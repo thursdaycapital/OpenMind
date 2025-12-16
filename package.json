@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "lint": "node -c api/dispatch.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2"
   }
 }
 
