@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenMind 网关测试台（BYOK）</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0b0f17;
+        --card: #121a28;
+        --text: #e6e9ef;
+        --muted: #9aa4b2;
+        --border: #243045;
+        --accent: #4f8cff;
+        --danger: #ff5c7a;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f6f7fb;
+          --card: #ffffff;
+          --text: #111827;
+          --muted: #6b7280;
+          --border: #e5e7eb;
+          --accent: #2563eb;
+          --danger: #e11d48;
+        }
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 960px;
+        margin: 40px auto;
+        padding: 0 16px;
+      }
+      .title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin-bottom: 18px;
+        line-height: 1.4;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: transparent;
+        color: var(--text);
+        outline: none;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 800px) {
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+      .btn {
+        background: var(--accent);
+        color: white;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .warn {
+        color: var(--danger);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="title">OpenMind 网关测试台（用户自带 API Key / BYOK）</div>
+      <div class="subtitle">
+        这是给“用户填写自己的 OpenMind API Key”的页面。它会把请求发到本项目的
+        <code>/api/dispatch</code>，并以 <code>Authorization: Bearer ...</code>
+        方式携带你的 key。<br />
+        注意：请只在你信任的域名上输入 key；页面不会持久化保存，但浏览器环境本身无法提供绝对安全保证。
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <label>OpenMind API Key（用户自己的）</label>
+            <input
+              id="apiKey"
+              type="password"
+              autocomplete="off"
+              placeholder="om1_live_..."
+            />
+            <div class="hint">不会写入服务器存储；仅在本次请求中作为请求头发送。</div>
+          </div>
+          <div>
+            <label>Model（可选）</label>
+            <input id="model" placeholder="gpt-4.1-mini" value="gpt-4.1-mini" />
+            <div class="hint">如果你的 OpenMind 账户支持其他模型，可自行改。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>System Prompt（可选）</label>
+        <input
+          id="system"
+          placeholder="You are a helpful robot."
+          value="You are a helpful robot."
+        />
+        <div style="height: 10px"></div>
+        <label>用户输入</label>
+        <input id="userText" placeholder="你好！请自我介绍一下。" />
+        <div style="height: 12px"></div>
+        <button id="sendBtn" class="btn">发送到 /api/dispatch</button>
+        <div id="err" class="warn" style="margin-top: 10px; display: none"></div>
+      </div>
+
+      <div class="card">
+        <label>响应（OpenMind + executor 转发结果）</label>
+        <pre id="out">尚未发送请求。</pre>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const out = $("out");
+      const err = $("err");
+      const btn = $("sendBtn");
+
+      function setError(message) {
+        if (!message) {
+          err.style.display = "none";
+          err.textContent = "";
+          return;
+        }
+        err.style.display = "block";
+        err.textContent = message;
+      }
+
+      async function send() {
+        setError("");
+        const apiKey = $("apiKey").value.trim();
+        const model = $("model").value.trim() || "gpt-4.1-mini";
+        const system = $("system").value.trim() || "You are a helpful robot.";
+        const userText = $("userText").value.trim();
+
+        if (!apiKey) return setError("请填写 OpenMind API Key。");
+        if (!userText) return setError("请填写用户输入文本。");
+
+        btn.disabled = true;
+        btn.textContent = "发送中…";
+        out.textContent = "请求中…";
+
+        const payload = {
+          openmind: {
+            body: {
+              model,
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: userText },
+              ],
+            },
+          },
+        };
+
+        try {
+          const r = await fetch("/api/dispatch", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const text = await r.text();
+          let data;
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = { raw: text };
+          }
+          out.textContent = JSON.stringify(
+            { http_status: r.status, ...data },
+            null,
+            2
+          );
+        } catch (e) {
+          setError(String(e));
+          out.textContent = "请求失败。";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "发送到 /api/dispatch";
+        }
+      }
+
+      btn.addEventListener("click", send);
+      $("userText").addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
+      });
+    </script>
+  </body>
+</html>
+
+

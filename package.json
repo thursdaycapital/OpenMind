@@ -1,0 +1,12 @@
+{
+  "name": "openmind-robot-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Vercel gateway + local executor for OpenMind/OM1 robots (multi-user, bring-your-own-key).",
+  "type": "module",
+  "scripts": {
+    "lint": "node -c api/dispatch.ts"
+  }
+}
+
+

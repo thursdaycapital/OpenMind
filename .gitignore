@@ -1,0 +1,8 @@
+node_modules/
+.vercel/
+__pycache__/
+.python-version
+.env
+.env.*
+
+

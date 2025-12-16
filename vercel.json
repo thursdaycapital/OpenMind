@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/dispatch.ts": {
+      "maxDuration": 30
+    }
+  }
+}
+
+

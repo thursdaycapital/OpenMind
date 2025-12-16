@@ -1,0 +1,53 @@
+// Example config snippet for the OpenMind "conversation" agent.
+// Add a MockInput so you can feed text for TTS debugging (see official docs).
+// Official reference:
+// - https://docs.openmind.org/examples/conversation
+//
+// Note: The exact config schema may differ depending on your OM1 version/agent.
+// The `test_sentences` list is provided as a convenient bundle of 30 test lines.
+{
+  agent_inputs: [
+    {
+      type: "MockInput",
+      config: {
+        input_name: "Voice Input",
+
+        // 30 TTS test sentences (copy/paste into your websocket input if needed)
+        test_sentences: [
+          "1) 你好，我正在测试语音合成是否正常。",
+          "2) 请用自然语速朗读这段话，并在句号处停顿。",
+          "3) 今天的日期是 2025-12-16，时间是 14:05。",
+          "4) 数字测试：0 1 2 3 4 5 6 7 8 9。",
+          "5) 小数与百分比：3.14159，完成率 98.6%。",
+          "6) 单位测试：10cm，1.5m，3kg，22°C。",
+          "7) 英文混读：OpenMind, conversation, and text-to-speech.",
+          "8) 拼写测试：A B C, a b c, X-Y-Z。",
+          "9) 标点测试：逗号，句号。问号？感叹号！冒号：分号；",
+          "10) 引号测试：“他说：‘开始吧。’”",
+          "11) 括号测试（这是括号内容），以及【方括号】。",
+          "12) 网址测试：请不要读成乱码：https://example.com/path?x=1&y=2",
+          "13) 邮箱测试：support@example.com。",
+          "14) 电话测试：+86 138 0013 8000。",
+          "15) 中英夹杂：把 ‘robot’ 读得清楚一点。",
+          "16) 速度测试：这是一句很短的话。",
+          "17) 长句测试：如果你能听到这句话，说明从输入到输出的音频链路已经完整打通，并且没有明显的断音或卡顿。",
+          "18) 情绪测试：我很开心，也有点紧张，但一切都在掌控之中。",
+          "19) 反问句测试：你觉得这段语音听起来像真人吗？",
+          "20) 多停顿测试：第一段……第二段……第三段。",
+          "21) 指令风格：请先抬头，再向左看三秒，然后说‘已完成’。",
+          "22) 安全提示：请不要执行任何危险动作，只进行语音输出测试。",
+          "23) 口令测试：芝麻开门，系统启动。",
+          "24) 姓名测试：张三、李四、王小明、Alice、Bob。",
+          "25) 地名测试：北京、上海、深圳、San Francisco。",
+          "26) 诗句测试：床前明月光，疑是地上霜。",
+          "27) 代码样式：if (x > 0) { return true; }",
+          "28) 连续数字：一二三四五六七八九十。",
+          "29) 音量提示：如果太小，请调高系统音量；如果爆音，请降低增益。",
+          "30) 结束语：测试完成，谢谢。",
+        ],
+      },
+    },
+  ],
+}
+
+
