@@ -260,11 +260,11 @@
       }
       #chatLog,
       #wsLog {
-        max-height: 420px;
+        max-height: 680px;
         overflow: auto;
       }
       #chatLog {
-        min-height: 220px;
+        min-height: 420px;
       }
     </style>
   </head>
@@ -309,6 +309,8 @@
           </div>
         </div>
       </div>
+
+      <div id="chatDock"></div>
 
       <div class="card" id="x402Card">
         <div class="title">x402 钱包（沙盒演示，机器人侧托管）</div>
@@ -495,7 +497,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="chatCard">
         <label>System Prompt（可选）</label>
         <textarea
           id="system"
@@ -635,6 +637,11 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
+      // Dock the main chat card under setupCard to make it the primary focus.
+      const chatDock = document.getElementById("chatDock");
+      const chatCard = document.getElementById("chatCard");
+      if (chatDock && chatCard) chatDock.appendChild(chatCard);
+
       const chatLog = $("chatLog");
       const err = $("err");
       const btn = $("sendBtn");
