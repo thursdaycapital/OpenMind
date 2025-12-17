@@ -1,0 +1,15 @@
+{
+  "name": "openmind-chain-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local chain service for OM1 executor: testnet native transfer + generic contract calls (ethers).",
+  "dependencies": {
+    "ethers": "6.15.0"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
+
+

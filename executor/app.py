@@ -2,16 +2,22 @@ import hmac
 import hashlib
 import json
 import os
+import re
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi import WebSocket, WebSocketDisconnect
 
+from chain_client import chain_execute
 from openmind_client import chat_completions, get_openmind_api_key
 from speech import speak
 from test_sentences import TEST_SENTENCES
 
 EXECUTOR_SHARED_SECRET = os.getenv("EXECUTOR_SHARED_SECRET", "")
+EXECUTOR_CHAIN_LOCAL_TOKEN = os.getenv("EXECUTOR_CHAIN_LOCAL_TOKEN", "")
+DEFAULT_RPC_URL = (os.getenv("DEFAULT_RPC_URL") or "https://rpc.testnet.arc.network").strip()
+DEFAULT_CHAIN_ID = int(os.getenv("DEFAULT_CHAIN_ID") or "5042002")
+DEFAULT_USDC_ADDRESS = (os.getenv("DEFAULT_USDC_ADDRESS") or "0x3600000000000000000000000000000000000000").strip()
 
 app = FastAPI(title="OpenMind Local Executor", version="0.1.0")
 
@@ -22,6 +28,63 @@ def _hmac_sha256_hex(secret: str, data: str) -> str:
 
 def _safe_equal(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+_ADDR_RE = re.compile(r"(0x[a-fA-F0-9]{40})")
+_AMOUNT_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
+
+
+def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Very small Chinese intent parser for transfers.
+
+    Supported examples:
+      - 转 1 USDC 到 0xabc...
+      - 转账 0.5 usdc 给 0xabc...
+      - 转 0.001 ETH 到 0xabc...
+    """
+
+    t = text.strip()
+    if not t:
+        return None
+
+    # Must contain a destination address
+    m_addr = _ADDR_RE.search(t)
+    if not m_addr:
+        return None
+    to = m_addr.group(1)
+
+    # Must contain a number
+    m_amt = _AMOUNT_RE.search(t)
+    if not m_amt:
+        return None
+    amount = m_amt.group(1)
+
+    lower = t.lower()
+    is_usdc = "usdc" in lower
+    is_eth = ("eth" in lower) or ("原生" in t) or ("主币" in t)
+
+    if is_usdc:
+        return {
+            "type": "transfer_erc20",
+            "rpc_url": DEFAULT_RPC_URL,
+            "expected_chain_id": DEFAULT_CHAIN_ID,
+            "token_address": DEFAULT_USDC_ADDRESS,
+            "to": to,
+            "amount": amount,
+            "decimals": 6,
+        }
+
+    if is_eth:
+        return {
+            "type": "transfer_native",
+            "rpc_url": DEFAULT_RPC_URL,
+            "expected_chain_id": DEFAULT_CHAIN_ID,
+            "to": to,
+            "amount_eth": amount,
+        }
+
+    # If user didn't specify token, we treat it as unknown (ask for clarification)
+    return {"_needs_token": True, "to": to, "amount": amount}
 
 
 @app.get("/healthz")
@@ -81,6 +144,35 @@ async def execute(
     }
 
 
+@app.post("/chain/execute")
+async def chain_execute_http(
+    req: Request,
+    x_local_token: Optional[str] = Header(default=None),
+):
+    """
+    Local chain execution endpoint.
+
+    If you set:
+      EXECUTOR_CHAIN_LOCAL_TOKEN=some-secret
+    then requests must include:
+      x-local-token: some-secret
+    """
+
+    if EXECUTOR_CHAIN_LOCAL_TOKEN:
+        if not x_local_token or x_local_token != EXECUTOR_CHAIN_LOCAL_TOKEN:
+            raise HTTPException(status_code=401, detail="Invalid x-local-token.")
+
+    try:
+        payload = await req.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object.")
+
+    result = await chain_execute(payload)
+    return {"ok": True, "chain_result": result}
+
+
 @app.websocket("/ws")
 async def ws_conversation(ws: WebSocket):
     """
@@ -96,10 +188,13 @@ async def ws_conversation(ws: WebSocket):
 
     await ws.accept()
     try:
+        pending_chain_payload: Optional[Dict[str, Any]] = None
         await ws.send_json(
             {
                 "type": "hello",
-                "message": "Connected. Send text to speak, or JSON: {\"type\":\"chat\",\"text\":\"...\"}.",
+                "message": "已连接。你可以直接中文对话，或发送 JSON 指令。\n"
+                "例：转 1 USDC 到 0x...\n"
+                "或：{\"type\":\"chat\",\"text\":\"...\"} / {\"type\":\"chain_execute\",\"payload\":{...}}",
                 "chat_enabled": bool(get_openmind_api_key()),
             }
         )
@@ -122,6 +217,20 @@ async def ws_conversation(ws: WebSocket):
                     speak(s)
                     await ws.send_json({"type": "spoken", "text": s})
                 await ws.send_json({"type": "done"})
+                continue
+
+            if obj and isinstance(obj, dict) and obj.get("type") == "chain_execute":
+                payload = obj.get("payload")
+                if not isinstance(payload, dict):
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "error": "Missing payload (object). Use {\"type\":\"chain_execute\",\"payload\":{...}}",
+                        }
+                    )
+                    continue
+                result = await chain_execute(payload)
+                await ws.send_json({"type": "chain_result", "result": result})
                 continue
 
             if obj and isinstance(obj, dict) and obj.get("type") == "chat":
@@ -167,9 +276,57 @@ async def ws_conversation(ws: WebSocket):
 
             # Default: speak what you typed
             text = msg.strip()
-            if text:
-                speak(text)
-                await ws.send_json({"type": "spoken", "text": text})
+            if not text:
+                continue
+
+            # ---- Chinese conversational control for chain transfers ----
+            if text in ("取消", "算了", "不转了", "撤销"):
+                pending_chain_payload = None
+                await ws.send_json({"type": "cancelled", "message": "已取消。"})
+                continue
+
+            if text in ("确认", "确定", "是", "yes", "y") and pending_chain_payload:
+                await ws.send_json({"type": "info", "message": "已确认，正在提交交易…"})
+                result = await chain_execute(pending_chain_payload)
+                pending_chain_payload = None
+                await ws.send_json({"type": "chain_result", "result": result})
+                continue
+
+            parsed = _parse_cn_transfer(text)
+            if parsed and parsed.get("_needs_token"):
+                await ws.send_json(
+                    {
+                        "type": "need_more",
+                        "message": "我识别到了金额和收款地址，但没看到币种。请说：转 X USDC 到 0x... 或 转 X ETH 到 0x...",
+                        "to": parsed.get("to"),
+                        "amount": parsed.get("amount"),
+                    }
+                )
+                continue
+
+            if parsed and parsed.get("type") in ("transfer_erc20", "transfer_native"):
+                pending_chain_payload = parsed
+                if parsed["type"] == "transfer_erc20":
+                    await ws.send_json(
+                        {
+                            "type": "confirm",
+                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount']} USDC（测试网）。回复“确认”执行，回复“取消”放弃。",
+                            "payload": parsed,
+                        }
+                    )
+                else:
+                    await ws.send_json(
+                        {
+                            "type": "confirm",
+                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount_eth']} ETH（测试网）。回复“确认”执行，回复“取消”放弃。",
+                            "payload": parsed,
+                        }
+                    )
+                continue
+
+            # Otherwise treat as "speak"
+            speak(text)
+            await ws.send_json({"type": "spoken", "text": text})
     except WebSocketDisconnect:
         return
 

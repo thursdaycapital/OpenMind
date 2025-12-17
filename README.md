@@ -50,6 +50,14 @@ uv run uvicorn app:app --host 0.0.0.0 --port 8787
 
 > 注意：这个输入框不会把 key 写入服务器存储，但 **用户仍应只在信任的域名使用**。
 
+#### 网页里直接“中文对话指挥机器人转账”
+
+首页同样提供了一个“机器人中文对话面板”，它会通过 WebSocket 连接你本地 executor 的 `WS /ws`。
+
+注意：
+- 如果网页是在 **https（Vercel）** 打开，浏览器会阻止 `ws://...`（混合内容），你需要提供 **`wss://.../ws`** 地址（例如用 ngrok / Cloudflare Tunnel 暴露 executor）。
+- `WS /ws` 是调试通道，不建议长期暴露给公网。
+
 ### 4) 本地对话（conversation 风格）调试
 
 官方 conversation 教程里使用 websocket 输入来测试音频输出（例如 `wscat -c ws://localhost:8765`）。参考：
@@ -70,5 +78,42 @@ wscat -c ws://localhost:8787/ws
 - 不要把 executor 的 `/ws` 暴露到公网（它是本地调试用）。
 - 对公网只暴露 executor 的 `/execute`，并要求 HMAC 签名（本仓库已实现）。
 - 建议在 Vercel 侧做：账号体系、限流、配额、动作白名单（例如禁止移动类指令）。
+
+## （测试网）链上动作：transfer / swap / mint（通过独立 chain-service）
+
+你提到要“机器人自动上链交互”，参考 Circle 的 onchain 能力组合思路（钱包/Paymaster/合规等）：
+- [Circle Build Onchain Experiences](https://developers.circle.com/build-onchain)
+
+本仓库提供一个本地 `chain-service`（Node + ethers）作为“链上动作执行器”，executor 通过 `chain_execute` 转发请求。
+
+> 说明：Swap / NFT mint 等都可以用通用 `contract_call` 实现（调用 router 或 NFT 合约的 mint 方法）。
+
+### 启动 chain-service（本地）
+
+```bash
+cd chain-service
+npm install
+npm start
+```
+
+### executor 转发到 chain-service
+
+```bash
+cd executor
+export CHAIN_SERVICE_URL="http://127.0.0.1:8790"
+uv run uvicorn app:app --host 127.0.0.1 --port 8787
+```
+
+### 本地测试（会返回缺少 RPC/私钥的提示）
+
+```bash
+curl -sS http://127.0.0.1:8787/chain/execute \
+  -H 'content-type: application/json' \
+  -d '{"type":"transfer_native","to":"0x0000000000000000000000000000000000000000","amount_eth":"0.001"}' | cat
+```
+
+要在测试网真的发交易，请在 `chain-service` 设置：
+- `RPC_URL`
+- `PRIVATE_KEY`
 
 

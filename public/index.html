@@ -174,6 +174,59 @@
         <label>响应（OpenMind + executor 转发结果）</label>
         <pre id="out">尚未发送请求。</pre>
       </div>
+
+      <div class="card">
+        <div class="title" style="font-size: 16px; margin: 0 0 6px 0">
+          机器人中文对话面板（连接本地 executor websocket）
+        </div>
+        <div class="subtitle" style="margin: 0 0 12px 0">
+          这里直接连到你本地 executor 的 <code>WS /ws</code>，支持中文指令（转账 + 确认/取消）。
+          如果你在 Vercel（https）打开本页面，浏览器会阻止 <code>ws://</code>，请用
+          <code>wss://</code>（例如 ngrok 的 wss 地址）。
+          <div class="warn" style="margin-top: 8px">
+            提醒：不要把 executor 的 /ws 长期暴露给公网；这是调试通道。
+          </div>
+        </div>
+
+        <label>Executor WebSocket URL</label>
+        <input
+          id="wsUrl"
+          placeholder="wss://xxxx.ngrok-free.app/ws"
+          value=""
+        />
+        <div class="hint">
+          本地打开可用：<code>ws://127.0.0.1:8787/ws</code>；Vercel/https 页面请用 wss。
+        </div>
+        <div style="height: 10px"></div>
+        <button id="wsConnectBtn" class="btn">连接</button>
+        <button id="wsDisconnectBtn" class="btn" style="background: transparent; border: 1px solid var(--border); color: var(--text); margin-left: 8px">
+          断开
+        </button>
+        <div style="height: 12px"></div>
+
+        <label>对话日志</label>
+        <pre id="wsLog">未连接。</pre>
+        <div style="height: 12px"></div>
+
+        <label>发送消息（中文指令或普通文本）</label>
+        <div class="row">
+          <input id="wsMsg" placeholder="例如：转 1.23 USDC 到 0x..." />
+          <button id="wsSendBtn" class="btn">发送</button>
+        </div>
+        <div class="hint">快捷：发送后如收到确认提示，请回复“确认”或“取消”。</div>
+
+        <div style="height: 12px"></div>
+        <div class="row">
+          <button id="btnConfirm" class="btn">确认</button>
+          <button
+            id="btnCancel"
+            class="btn"
+            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
+          >
+            取消
+          </button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -181,6 +234,17 @@
       const out = $("out");
       const err = $("err");
       const btn = $("sendBtn");
+
+      const wsLog = $("wsLog");
+      const wsUrl = $("wsUrl");
+      const wsConnectBtn = $("wsConnectBtn");
+      const wsDisconnectBtn = $("wsDisconnectBtn");
+      const wsSendBtn = $("wsSendBtn");
+      const wsMsg = $("wsMsg");
+      const btnConfirm = $("btnConfirm");
+      const btnCancel = $("btnCancel");
+
+      let sock = null;
 
       function setError(message) {
         if (!message) {
@@ -190,6 +254,80 @@
         }
         err.style.display = "block";
         err.textContent = message;
+      }
+
+      function logLine(line) {
+        const current = wsLog.textContent || "";
+        const next = current === "未连接。" ? "" : current;
+        wsLog.textContent = (next ? next + "\n" : "") + line;
+      }
+
+      function tryDefaultWsUrl() {
+        // If running locally (http), default to ws://localhost.
+        if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+          return "ws://127.0.0.1:8787/ws";
+        }
+        // Otherwise leave empty; user should paste wss:// from their tunnel (ngrok/cloudflare).
+        return "";
+      }
+
+      wsUrl.value = tryDefaultWsUrl();
+
+      function connectWs() {
+        const url = wsUrl.value.trim();
+        if (!url) {
+          logLine("[ui] 请先填写 Executor WebSocket URL（wss://.../ws）。");
+          return;
+        }
+        if (sock) {
+          logLine("[ui] 已连接或正在连接，请先断开。");
+          return;
+        }
+        try {
+          sock = new WebSocket(url);
+        } catch (e) {
+          sock = null;
+          logLine("[ui] WebSocket 创建失败：" + String(e));
+          return;
+        }
+
+        logLine("[ui] connecting… " + url);
+        sock.onopen = () => logLine("[ws] connected");
+        sock.onclose = () => {
+          logLine("[ws] closed");
+          sock = null;
+        };
+        sock.onerror = (e) => logLine("[ws] error: " + JSON.stringify(e));
+        sock.onmessage = (ev) => {
+          const raw = String(ev.data ?? "");
+          let obj = null;
+          try { obj = JSON.parse(raw); } catch {}
+          if (obj && obj.type === "chain_result") {
+            // Best-effort link to arcscan if tx_hash exists
+            const tx = obj?.result?.data?.tx_hash || obj?.result?.data?.data?.tx_hash;
+            logLine("[robot] " + JSON.stringify(obj, null, 2));
+            if (tx) logLine("[robot] tx_hash: " + tx + " (打开 testnet.arcscan.app 查询)");
+            return;
+          }
+          logLine("[robot] " + (obj ? JSON.stringify(obj, null, 2) : raw));
+        };
+      }
+
+      function disconnectWs() {
+        if (!sock) {
+          logLine("[ui] 未连接。");
+          return;
+        }
+        sock.close();
+      }
+
+      function sendWs(text) {
+        if (!sock || sock.readyState !== WebSocket.OPEN) {
+          logLine("[ui] 未连接 websocket。");
+          return;
+        }
+        sock.send(text);
+        logLine("[me] " + text);
       }
 
       async function send() {
@@ -253,6 +391,15 @@
       $("userText").addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
       });
+
+      wsConnectBtn.addEventListener("click", connectWs);
+      wsDisconnectBtn.addEventListener("click", disconnectWs);
+      wsSendBtn.addEventListener("click", () => sendWs(wsMsg.value.trim()));
+      wsMsg.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendWs(wsMsg.value.trim());
+      });
+      btnConfirm.addEventListener("click", () => sendWs("确认"));
+      btnCancel.addEventListener("click", () => sendWs("取消"));
     </script>
   </body>
 </html>
