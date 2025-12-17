@@ -279,13 +279,50 @@
         </div>
         <div style="height: 12px"></div>
         <div class="row">
+          <div>
+            <label>聊天执行通道</label>
+            <select id="chatBackend">
+              <option value="ws" selected>机器人直连（WS，可转账）</option>
+              <option value="openmind">AI（OpenMind，经 /api/dispatch）</option>
+            </select>
+          </div>
+          <div>
+            <label>Executor WebSocket URL（用于 WS 模式）</label>
+            <input id="wsUrlInline" placeholder="wss://xxxx.ngrok-free.app/ws" />
+            <div class="hint">Vercel/https 页面必须用 wss://；本地可用 ws://127.0.0.1:8787/ws</div>
+          </div>
+        </div>
+        <div style="height: 10px"></div>
+        <div class="row">
+          <button id="wsConnectBtnInline" class="btn">连接机器人（WS）</button>
+          <button
+            id="wsDisconnectBtnInline"
+            class="btn"
+            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
+          >
+            断开机器人（WS）
+          </button>
+        </div>
+        <div style="height: 12px"></div>
+        <div class="row">
           <input id="userText" placeholder="例如：帮我转 0.1 USDC 到 0x..." />
           <button id="sendBtn" class="btn">发送</button>
+        </div>
+        <div style="height: 12px"></div>
+        <div class="row">
+          <button id="btnChatConfirm" class="btn">确认</button>
+          <button
+            id="btnChatCancel"
+            class="btn"
+            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
+          >
+            取消
+          </button>
         </div>
         <div id="err" class="warn" style="margin-top: 10px; display: none"></div>
       </div>
 
-      <div class="card">
+      <div class="card" style="display:none">
         <div class="title" style="font-size: 16px; margin: 0 0 6px 0">
           机器人中文对话面板（连接本地 executor websocket）
         </div>
@@ -370,6 +407,12 @@
       const forceJsonSel = $("forceJson");
       const execMode = $("execMode");
       const cmdHint = $("cmdHint");
+      const chatBackend = $("chatBackend");
+      const wsUrlInline = $("wsUrlInline");
+      const wsConnectBtnInline = $("wsConnectBtnInline");
+      const wsDisconnectBtnInline = $("wsDisconnectBtnInline");
+      const btnChatConfirm = $("btnChatConfirm");
+      const btnChatCancel = $("btnChatCancel");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
@@ -414,6 +457,7 @@
       }
 
       wsUrl.value = tryDefaultWsUrl();
+      if (wsUrlInline) wsUrlInline.value = wsUrl.value;
 
       function normalizeWsUrl(input) {
         let u = (input || "").trim();
@@ -449,7 +493,7 @@
       }
 
       function connectWs() {
-        const url = normalizeWsUrl(wsUrl.value);
+        const url = normalizeWsUrl((wsUrlInline && wsUrlInline.value) || wsUrl.value);
         if (!url) {
           logLine("[ui] 请先填写 Executor WebSocket URL（例如 wss://xxxx.ngrok-free.app/ws）。");
           return;
@@ -482,9 +526,13 @@
             const tx = obj?.result?.data?.tx_hash || obj?.result?.data?.data?.tx_hash;
             logLine("[robot] " + JSON.stringify(obj, null, 2));
             if (tx) logLine("[robot] tx_hash: " + tx + " (打开 testnet.arcscan.app 查询)");
+            if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+            chatLog.textContent += `\n[机器人] ${JSON.stringify(obj)}`;
             return;
           }
           logLine("[robot] " + (obj ? JSON.stringify(obj, null, 2) : raw));
+          if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+          chatLog.textContent += `\n[机器人] ${obj ? JSON.stringify(obj) : raw}`;
         };
       }
 
@@ -512,8 +560,18 @@
         let system = $("system").value.trim() || "You are a helpful robot.";
         const userText = $("userText").value.trim();
 
-        if (!apiKey) return setError("请填写 OpenMind API Key。");
         if (!userText) return setError("请填写用户输入文本。");
+
+        // WS mode: send directly to executor websocket (this is the path that reliably supports transfers)
+        if (chatBackend && chatBackend.value === "ws") {
+          if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+          chatLog.textContent += (chatLog.textContent ? "\n" : "") + `[我] ${userText}`;
+          sendWs(userText);
+          return;
+        }
+
+        // OpenMind mode requires API key
+        if (!apiKey) return setError("请填写 OpenMind API Key。");
 
         // If wallet connected, provide context so the model outputs allowance-based commands.
         // This keeps keys user-controlled and enables relayer transferFrom after approve.
@@ -667,6 +725,21 @@
       });
       btnWsConfirm.addEventListener("click", () => sendWs("确认"));
       btnCancel.addEventListener("click", () => sendWs("取消"));
+
+      // Inline WS controls (single chat)
+      if (wsConnectBtnInline) wsConnectBtnInline.addEventListener("click", connectWs);
+      if (wsDisconnectBtnInline) wsDisconnectBtnInline.addEventListener("click", disconnectWs);
+
+      // Single chat confirm/cancel buttons
+      if (btnChatConfirm)
+        btnChatConfirm.addEventListener("click", () => {
+          if (chatBackend && chatBackend.value === "ws") return sendWs("确认");
+          return btnConfirmExecute.click();
+        });
+      if (btnChatCancel)
+        btnChatCancel.addEventListener("click", () => {
+          if (chatBackend && chatBackend.value === "ws") return sendWs("取消");
+        });
 
       // ---- MetaMask + Approve flow (Allowance-based MVP) ----
       async function loadPublicConfig() {
