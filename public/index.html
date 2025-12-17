@@ -313,16 +313,11 @@
       <div class="card" id="x402Card">
         <div class="title">x402 钱包（沙盒演示，机器人侧托管）</div>
         <div class="subtitle" style="margin: 0 0 12px 0">
-          说明：这里是“模拟 x402”的沙盒钱包与账本，钱包状态保存在本地 executor（不是浏览器）。
-          网页会根据你填写的 WS 地址派生出 HTTP(S) 地址来调用 executor 的 <span class="mono">/x402/*</span> 接口。
+          说明：这里是“模拟 x402”的沙盒钱包与账本，钱包状态保存在 **线上 Vercel API**（同域 <span class="mono">/api/x402/*</span>）。
+          不需要连接本地 executor / WebSocket。
         </div>
 
         <div class="row">
-          <div>
-            <label>Executor HTTP Base（自动从 WS 推导，可手动覆盖）</label>
-            <input id="x402HttpBase" placeholder="例如：https://xxxx.ngrok-free.app" />
-            <div class="hint">如果你只填了 WS（wss://.../ws），这里会自动填成 https://...。</div>
-          </div>
           <div>
             <label>授权开关（是否允许机器人发起支付）</label>
             <select id="x402Auth">
@@ -330,6 +325,10 @@
               <option value="on">开启</option>
             </select>
             <div class="hint">关闭时点击“支付”会被拒绝（沙盒演示）。</div>
+          </div>
+          <div>
+            <label>存储说明</label>
+            <pre id="x402StorageHint">默认内存；可选接入 Vercel KV 持久化</pre>
           </div>
         </div>
 
@@ -682,7 +681,6 @@
       const robotUsdcAmount = $("robotUsdcAmount");
       const btnRobotFundGas = $("btnRobotFundGas");
       const btnRobotFundUsdc = $("btnRobotFundUsdc");
-      const x402HttpBase = $("x402HttpBase");
       const x402Auth = $("x402Auth");
       const btnX402Refresh = $("btnX402Refresh");
       const btnX402Faucet = $("btnX402Faucet");
@@ -693,6 +691,7 @@
       const x402PayMemo = $("x402PayMemo");
       const btnX402Pay = $("btnX402Pay");
       const x402ResultOut = $("x402ResultOut");
+      const x402StorageHint = $("x402StorageHint");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
@@ -703,40 +702,8 @@
       let walletAddress = "";
       let robotWallet = null;
 
-      function normalizeHttpBase(input) {
-        let u = (input || "").trim();
-        if (!u) return "";
-        // If user pastes ws/wss, convert to http/https.
-        if (u.startsWith("ws://")) u = "http://" + u.slice("ws://".length);
-        if (u.startsWith("wss://")) u = "https://" + u.slice("wss://".length);
-        // If user pastes host without scheme, assume https on remote, http on localhost.
-        const hasScheme = u.startsWith("http://") || u.startsWith("https://");
-        if (!hasScheme) {
-          const local =
-            location.hostname === "localhost" || location.hostname === "127.0.0.1";
-          u = (local ? "http://" : "https://") + u;
-        }
-        try {
-          const parsed = new URL(u);
-          // Strip path/query/hash; keep origin only.
-          return parsed.origin;
-        } catch {
-          return u.replace(/\/+$/, "");
-        }
-      }
-
-      function deriveHttpBaseFromWsField() {
-        const ws = (wsUrlInline?.value || wsUrl?.value || "").trim();
-        if (!ws) return "";
-        return normalizeHttpBase(ws);
-      }
-
       async function x402Fetch(path, opts) {
-        const base =
-          normalizeHttpBase(x402HttpBase?.value) || deriveHttpBaseFromWsField();
-        if (!base) throw new Error("请先填写/连接 executor（WS URL 或 HTTP Base）。");
-        if (x402HttpBase && !x402HttpBase.value.trim()) x402HttpBase.value = base;
-        const url = base + path;
+        const url = "/api" + path;
         const r = await fetch(url, {
           method: (opts && opts.method) || "GET",
           headers: {
@@ -766,6 +733,12 @@
           const s = await x402Fetch("/x402/status");
           if (x402StatusOut) x402StatusOut.textContent = JSON.stringify(s, null, 2);
           if (x402Auth && s?.wallet) x402Auth.value = s.wallet.auth_enabled ? "on" : "off";
+          if (x402StorageHint && s?.storage) {
+            x402StorageHint.textContent =
+              s.storage === "kv"
+                ? "已启用 Vercel KV（持久化）"
+                : "未启用 KV：当前为内存（冷启动会重置）";
+          }
           if (x402ResultOut) x402ResultOut.textContent = "-";
           setError("");
         } catch (e) {
@@ -820,11 +793,8 @@
         }
       });
 
-      // Try to prefill http base from ws on load
-      if (x402HttpBase && !x402HttpBase.value.trim()) {
-        const b = deriveHttpBaseFromWsField();
-        if (b) x402HttpBase.value = b;
-      }
+      // Load status on startup (best effort)
+      refreshX402Status();
 
       function setRobotWallet(w) {
         robotWallet = w;
