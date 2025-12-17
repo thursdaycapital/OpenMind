@@ -58,6 +58,14 @@ uv run uvicorn app:app --host 0.0.0.0 --port 8787
 - 如果网页是在 **https（Vercel）** 打开，浏览器会阻止 `ws://...`（混合内容），你需要提供 **`wss://.../ws`** 地址（例如用 ngrok / Cloudflare Tunnel 暴露 executor）。
 - `WS /ws` 是调试通道，不建议长期暴露给公网。
 
+#### 关于“把私钥放在前端输入框”
+
+不会做、也不建议做：**前端输入私钥意味着私钥会暴露给浏览器环境、网页脚本、以及任何中间链路**，风险非常高（即使测试网也容易被滥用）。
+
+推荐两种安全替代：
+- **本地 `.env`**：私钥只放在你本机 `chain-service/.env`（不会提交到 GitHub/Vercel）
+- **浏览器钱包/用户控钥**：用 MetaMask/Passkey 等在用户侧签名，再把签名结果发送给后端执行（更符合 “user-controlled wallet” 思路，参考 [Circle Build Onchain Experiences](https://developers.circle.com/build-onchain)）
+
 ### 4) 本地对话（conversation 风格）调试
 
 官方 conversation 教程里使用 websocket 输入来测试音频输出（例如 `wscat -c ws://localhost:8765`）。参考：

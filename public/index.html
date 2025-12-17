@@ -127,15 +127,13 @@
   </head>
   <body>
     <div class="wrap">
-      <div class="title">OpenMind 网关测试台（用户自带 API Key / BYOK）</div>
+      <div class="title">OpenMind × 机器人 × 链上执行（单窗口聊天）</div>
       <div class="subtitle">
-        这是给“用户填写自己的 OpenMind API Key”的页面。它会把请求发到本项目的
-        <code>/api/dispatch</code>，并以 <code>Authorization: Bearer ...</code>
-        方式携带你的 key。<br />
-        注意：请只在你信任的域名上输入 key；页面不会持久化保存，但浏览器环境本身无法提供绝对安全保证。
+        在同一个聊天窗口里：用户输入 → OpenMind 生成回复与 <code>commands</code> → 若包含 <code>chain_execute</code>，点击“确认执行”后才会转发到本地 executor/chain-service。<br />
+        注意：页面不会持久化保存 key，但浏览器环境本身无法提供绝对安全保证；请只在你信任的域名上使用。
       </div>
 
-      <div class="card">
+      <div class="card" id="setupCard">
         <div class="row">
           <div>
             <label>OpenMind API Key（用户自己的）</label>
@@ -162,17 +160,15 @@
           placeholder="You are a helpful robot."
           value="You are a helpful robot."
         />
-        <div style="height: 10px"></div>
-        <label>用户输入</label>
-        <input id="userText" placeholder="你好！请自我介绍一下。" />
         <div style="height: 12px"></div>
-        <button id="sendBtn" class="btn">发送到 /api/dispatch</button>
+        <label>聊天记录</label>
+        <pre id="chatLog">尚未开始对话。</pre>
+        <div style="height: 12px"></div>
+        <div class="row">
+          <input id="userText" placeholder="例如：帮我转 0.1 USDC 到 0x..." />
+          <button id="sendBtn" class="btn">发送</button>
+        </div>
         <div id="err" class="warn" style="margin-top: 10px; display: none"></div>
-      </div>
-
-      <div class="card">
-        <label>响应（OpenMind + executor 转发结果）</label>
-        <pre id="out">尚未发送请求。</pre>
       </div>
 
       <div class="card">
@@ -204,7 +200,7 @@
         </button>
         <div style="height: 12px"></div>
 
-        <label>对话日志</label>
+        <label>对话日志（WebSocket）</label>
         <pre id="wsLog">未连接。</pre>
         <div style="height: 12px"></div>
 
@@ -231,7 +227,7 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-      const out = $("out");
+      const chatLog = $("chatLog");
       const err = $("err");
       const btn = $("sendBtn");
 
@@ -245,6 +241,8 @@
       const btnCancel = $("btnCancel");
 
       let sock = null;
+      let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
+      let lastCommands = null;
 
       function setError(message) {
         if (!message) {
@@ -375,7 +373,9 @@
 
         btn.disabled = true;
         btn.textContent = "发送中…";
-        out.textContent = "请求中…";
+
+        if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+        chatLog.textContent += (chatLog.textContent ? "\n" : "") + `[我] ${userText}`;
 
         const payload = {
           openmind: {
@@ -387,6 +387,8 @@
               ],
             },
           },
+          // Do NOT auto-forward before user confirms. We'll call /api/execute after confirmation.
+          forward_to_executor: false,
         };
 
         try {
@@ -406,23 +408,66 @@
           } catch {
             data = { raw: text };
           }
-          out.textContent = JSON.stringify(
-            { http_status: r.status, ...data },
-            null,
-            2
-          );
+
+          // Display assistant content if present
+          let assistant = "";
+          try {
+            assistant = data?.openmind_response?.choices?.[0]?.message?.content || "";
+          } catch {}
+          if (assistant) {
+            chatLog.textContent += `\n[助手] ${assistant}`;
+          } else {
+            chatLog.textContent += `\n[助手] （已返回 OpenMind 响应，但未找到 message.content）`;
+          }
+
+          // Store for confirm-to-execute
+          lastOpenMindPayloadForExecutor = {
+            openmind_status: data?.openmind_status,
+            openmind_response: data?.openmind_response,
+          };
+
+          // Try to extract commands (best effort)
+          lastCommands = data?.openmind_response?.commands || null;
+          if (Array.isArray(lastCommands) && lastCommands.length) {
+            chatLog.textContent += `\n[系统] 检测到 commands：${JSON.stringify(lastCommands)}`;
+            chatLog.textContent += `\n[系统] 如包含 chain_execute，请点击下方“确认执行”。`;
+          } else {
+            // If the assistant returned JSON, user can still use websocket panel.
+          }
         } catch (e) {
           setError(String(e));
-          out.textContent = "请求失败。";
+          chatLog.textContent += `\n[系统] 请求失败：${String(e)}`;
         } finally {
           btn.disabled = false;
-          btn.textContent = "发送到 /api/dispatch";
+          btn.textContent = "发送";
         }
       }
 
       btn.addEventListener("click", send);
       $("userText").addEventListener("keydown", (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter") send();
+      });
+
+      // Confirm-to-execute from the same window
+      btnConfirm.addEventListener("click", async () => {
+        if (!lastOpenMindPayloadForExecutor) {
+          logLine("[ui] 没有可执行的 payload（请先发送一条消息）。");
+          return;
+        }
+        logLine("[ui] 正在确认执行（调用 /api/execute）…");
+        try {
+          const r = await fetch("/api/execute", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ payload: lastOpenMindPayloadForExecutor }),
+          });
+          const text = await r.text();
+          let data;
+          try { data = JSON.parse(text); } catch { data = { raw: text }; }
+          chatLog.textContent += `\n[执行结果] ${JSON.stringify(data)}`;
+        } catch (e) {
+          chatLog.textContent += `\n[执行结果] 失败：${String(e)}`;
+        }
       });
 
       wsConnectBtn.addEventListener("click", connectWs);

@@ -231,7 +231,8 @@ async def execute(
     openmind_response = payload.get("openmind_response")
 
     executed: list[Dict[str, Any]] = []
-    if EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY:
+    confirmed = bool(payload.get("confirmed"))
+    if confirmed or EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY:
         cmds = _extract_commands(openmind_response)
         for c in cmds:
             ctype = c.get("type")
