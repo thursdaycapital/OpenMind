@@ -35,6 +35,7 @@ uv run uvicorn app:app --host 0.0.0.0 --port 8787
   - Chinese transfer (with confirmation):
     - `转 1 USDC 到 0x...` → reply `确认` / `取消`
     - `转 0.001 ETH 到 0x...` → reply `确认` / `取消`
+    - batch: `转 10 次 0.1 USDC 到 0x...` → reply `确认` / `取消`（一次确认后自动连续发 10 笔）
 
 ### Local conversation-style test (like the official docs)
 

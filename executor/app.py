@@ -31,6 +31,7 @@ def _safe_equal(a: str, b: str) -> bool:
 
 _ADDR_RE = re.compile(r"(0x[a-fA-F0-9]{40})")
 _AMOUNT_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
+_TIMES_RE = re.compile(r"(?:转|转账)\s*([0-9]{1,4})\s*次")
 
 
 def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
@@ -53,7 +54,16 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
         return None
     to = m_addr.group(1)
 
-    # Must contain a number
+    # Optional: how many times
+    times = 1
+    m_times = _TIMES_RE.search(t)
+    if m_times:
+        try:
+            times = max(1, int(m_times.group(1)))
+        except Exception:
+            times = 1
+
+    # Must contain a number (amount)
     m_amt = _AMOUNT_RE.search(t)
     if not m_amt:
         return None
@@ -72,6 +82,7 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
             "to": to,
             "amount": amount,
             "decimals": 6,
+            "times": times,
         }
 
     if is_eth:
@@ -81,6 +92,7 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
             "expected_chain_id": DEFAULT_CHAIN_ID,
             "to": to,
             "amount_eth": amount,
+            "times": times,
         }
 
     # If user didn't specify token, we treat it as unknown (ask for clarification)
@@ -286,10 +298,29 @@ async def ws_conversation(ws: WebSocket):
                 continue
 
             if text in ("确认", "确定", "是", "yes", "y") and pending_chain_payload:
-                await ws.send_json({"type": "info", "message": "已确认，正在提交交易…"})
-                result = await chain_execute(pending_chain_payload)
+                times = int(pending_chain_payload.get("times") or 1)
+                times = max(1, min(times, 50))  # avoid accidental huge batches
+
+                await ws.send_json(
+                    {
+                        "type": "info",
+                        "message": f"已确认，准备提交 {times} 笔交易…",
+                        "times": times,
+                    }
+                )
+
+                # Execute sequentially for nonce safety.
+                base = dict(pending_chain_payload)
+                base.pop("times", None)
+                results = []
+                for i in range(times):
+                    await ws.send_json({"type": "progress", "index": i + 1, "total": times})
+                    r = await chain_execute(base)
+                    results.append(r)
+                    await ws.send_json({"type": "chain_result", "index": i + 1, "total": times, "result": r})
+
                 pending_chain_payload = None
-                await ws.send_json({"type": "chain_result", "result": result})
+                await ws.send_json({"type": "done", "count": times, "results_count": len(results)})
                 continue
 
             parsed = _parse_cn_transfer(text)
@@ -307,18 +338,20 @@ async def ws_conversation(ws: WebSocket):
             if parsed and parsed.get("type") in ("transfer_erc20", "transfer_native"):
                 pending_chain_payload = parsed
                 if parsed["type"] == "transfer_erc20":
+                    times = int(parsed.get("times") or 1)
                     await ws.send_json(
                         {
                             "type": "confirm",
-                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount']} USDC（测试网）。回复“确认”执行，回复“取消”放弃。",
+                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount']} USDC（测试网），共 {times} 次。回复“确认”执行，回复“取消”放弃。",
                             "payload": parsed,
                         }
                     )
                 else:
+                    times = int(parsed.get("times") or 1)
                     await ws.send_json(
                         {
                             "type": "confirm",
-                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount_eth']} ETH（测试网）。回复“确认”执行，回复“取消”放弃。",
+                            "message": f"确认转账：向 {parsed['to']} 转 {parsed['amount_eth']} ETH（测试网），共 {times} 次。回复“确认”执行，回复“取消”放弃。",
                             "payload": parsed,
                         }
                     )
