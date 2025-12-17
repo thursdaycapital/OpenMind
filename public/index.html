@@ -254,6 +254,10 @@
         border: 1px solid var(--border-2);
         color: var(--muted);
       }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
       #chatLog,
       #wsLog {
         max-height: 420px;
@@ -368,6 +372,64 @@
         </div>
         <div class="warn" style="margin-top: 10px">
           注意：Approve 相当于授权额度。请只对你信任的 relayer 地址授权，测试网也建议设置小额度。
+        </div>
+      </div>
+
+      <div class="card" id="robotWalletCard">
+        <div class="title">机器人钱包（浏览器生成，仅测试用）</div>
+        <div class="subtitle" style="margin: 0 0 12px 0">
+          这个钱包由网页在你的浏览器本地生成并展示私钥/助记词。它不会自动有余额；你可以用下方按钮通过已连接的本地 executor（WS）让 relayer 给它打一点测试网主币（gas）或 USDC（如果 relayer 有余额）。
+        </div>
+
+        <div class="row row-2">
+          <button id="btnRobotGenerate" class="btn">生成机器人钱包</button>
+          <button id="btnRobotClear" class="btn secondary">清空</button>
+        </div>
+
+        <div style="height: 12px"></div>
+        <label>机器人地址</label>
+        <pre id="robotAddrOut">-</pre>
+        <div style="height: 10px"></div>
+        <div class="row row-tight">
+          <button id="btnRobotCopyAddr" class="btn secondary">复制地址</button>
+          <button id="btnRobotDownload" class="btn secondary">下载备份（JSON）</button>
+        </div>
+
+        <div style="height: 12px"></div>
+        <label>私钥（敏感）</label>
+        <pre id="robotPrivOut">-</pre>
+        <div style="height: 10px"></div>
+        <button id="btnRobotCopyPriv" class="btn secondary">复制私钥</button>
+
+        <div style="height: 12px"></div>
+        <label>助记词（如有）</label>
+        <pre id="robotMnemonicOut">-</pre>
+
+        <div class="warn" style="margin-top: 10px">
+          注意：任何看到你屏幕/浏览器的人都可能拿到私钥。仅用于测试网；不要在主网或真实资产使用。
+        </div>
+
+        <div style="height: 14px"></div>
+        <div class="row row-2">
+          <div>
+            <label>请求打 gas（ETH/主币）数量</label>
+            <input id="robotGasAmount" value="0.01" />
+            <div class="hint">
+              会通过 WS 发送：<span class="mono">转 X ETH 到 0x...</span>，然后你再点“确认”。
+            </div>
+          </div>
+          <div>
+            <label>请求打 USDC 数量</label>
+            <input id="robotUsdcAmount" value="1" />
+            <div class="hint">
+              会通过 WS 发送：<span class="mono">转 X USDC 到 0x...</span>（需要 relayer 有 USDC）。
+            </div>
+          </div>
+        </div>
+        <div style="height: 12px"></div>
+        <div class="row row-2">
+          <button id="btnRobotFundGas" class="btn">请求打 gas（走 WS）</button>
+          <button id="btnRobotFundUsdc" class="btn secondary">请求打 USDC（走 WS）</button>
         </div>
       </div>
 
@@ -545,6 +607,18 @@
       const wsDisconnectBtnInline = $("wsDisconnectBtnInline");
       const btnChatConfirm = $("btnChatConfirm");
       const btnChatCancel = $("btnChatCancel");
+      const btnRobotGenerate = $("btnRobotGenerate");
+      const btnRobotClear = $("btnRobotClear");
+      const robotAddrOut = $("robotAddrOut");
+      const robotPrivOut = $("robotPrivOut");
+      const robotMnemonicOut = $("robotMnemonicOut");
+      const btnRobotCopyAddr = $("btnRobotCopyAddr");
+      const btnRobotCopyPriv = $("btnRobotCopyPriv");
+      const btnRobotDownload = $("btnRobotDownload");
+      const robotGasAmount = $("robotGasAmount");
+      const robotUsdcAmount = $("robotUsdcAmount");
+      const btnRobotFundGas = $("btnRobotFundGas");
+      const btnRobotFundUsdc = $("btnRobotFundUsdc");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
@@ -553,6 +627,50 @@
       let walletProvider = null;
       let signer = null;
       let walletAddress = "";
+      let robotWallet = null;
+
+      function setRobotWallet(w) {
+        robotWallet = w;
+        if (!w) {
+          robotAddrOut.textContent = "-";
+          robotPrivOut.textContent = "-";
+          robotMnemonicOut.textContent = "-";
+          return;
+        }
+        robotAddrOut.textContent = w.address || "-";
+        robotPrivOut.textContent = w.privateKey || "-";
+        const phrase = w?.mnemonic?.phrase || "";
+        robotMnemonicOut.textContent = phrase || "-";
+      }
+
+      async function copyText(s) {
+        const text = String(s || "");
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+      }
+
+      function downloadJson(filename, obj) {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       function updateExecMode() {
         const on = autoExecuteSel.value === "on";
@@ -572,6 +690,76 @@
         err.style.display = "block";
         err.textContent = message;
       }
+
+      // ---- Robot wallet (browser generated) ----
+      btnRobotGenerate?.addEventListener("click", () => {
+        try {
+          const w = ethers.Wallet.createRandom();
+          setRobotWallet(w);
+          setError("");
+          if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+          chatLog.textContent += `\n[ui] 已生成机器人钱包：${w.address}`;
+        } catch (e) {
+          setError("生成钱包失败：" + String(e));
+        }
+      });
+      btnRobotClear?.addEventListener("click", () => {
+        setRobotWallet(null);
+        setError("");
+      });
+      btnRobotCopyAddr?.addEventListener("click", async () => {
+        if (!robotWallet?.address) return setError("请先生成机器人钱包。");
+        await copyText(robotWallet.address);
+        setError("");
+      });
+      btnRobotCopyPriv?.addEventListener("click", async () => {
+        if (!robotWallet?.privateKey) return setError("请先生成机器人钱包。");
+        await copyText(robotWallet.privateKey);
+        setError("");
+      });
+      btnRobotDownload?.addEventListener("click", () => {
+        if (!robotWallet?.address || !robotWallet?.privateKey)
+          return setError("请先生成机器人钱包。");
+        const payload = {
+          address: robotWallet.address,
+          private_key: robotWallet.privateKey,
+          mnemonic: robotWallet?.mnemonic?.phrase || null,
+          created_at: new Date().toISOString(),
+          note: "Testnet only. Keep private_key safe. Do NOT use on mainnet.",
+        };
+        downloadJson(`robot-wallet-${robotWallet.address}.json`, payload);
+        setError("");
+      });
+
+      function ensureWsConnectedForFunding() {
+        if (!sock || sock.readyState !== WebSocket.OPEN) {
+          setError("请先连接机器人（WS），再执行打款。");
+          return false;
+        }
+        if (chatBackend) chatBackend.value = "ws";
+        return true;
+      }
+
+      btnRobotFundGas?.addEventListener("click", () => {
+        if (!robotWallet?.address) return setError("请先生成机器人钱包。");
+        if (!ensureWsConnectedForFunding()) return;
+        const amt = String(robotGasAmount?.value || "0.01").trim() || "0.01";
+        const text = `转 ${amt} ETH 到 ${robotWallet.address}`;
+        if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+        chatLog.textContent += (chatLog.textContent ? "\n" : "") + `[我] ${text}`;
+        sendWs(text);
+        setError("");
+      });
+      btnRobotFundUsdc?.addEventListener("click", () => {
+        if (!robotWallet?.address) return setError("请先生成机器人钱包。");
+        if (!ensureWsConnectedForFunding()) return;
+        const amt = String(robotUsdcAmount?.value || "1").trim() || "1";
+        const text = `转 ${amt} USDC 到 ${robotWallet.address}`;
+        if (chatLog.textContent === "尚未开始对话。") chatLog.textContent = "";
+        chatLog.textContent += (chatLog.textContent ? "\n" : "") + `[我] ${text}`;
+        sendWs(text);
+        setError("");
+      });
 
       function logLine(line) {
         const current = wsLog.textContent || "";
