@@ -16,7 +16,14 @@ RPC_URL="https://..." PRIVATE_KEY="0x..." npm start
 
 #### 推荐：用 .env（不要提交到 Git）
 
-在 `chain-service/.env` 里写：
+先复制模板：
+
+```bash
+cd chain-service
+cp env.local.example .env
+```
+
+再在 `chain-service/.env` 里写（把 PRIVATE_KEY 换成你自己的）：
 
 ```bash
 RPC_URL=https://rpc.testnet.arc.network
