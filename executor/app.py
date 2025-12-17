@@ -3,10 +3,14 @@ import hashlib
 import json
 import os
 import re
+import secrets
+import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from chain_client import chain_execute
 from openmind_client import chat_completions, get_openmind_api_key
@@ -25,6 +29,150 @@ EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY = (os.getenv("EXECUTOR_ENABLE_CHAIN_FROM_GATE
 )
 
 app = FastAPI(title="OpenMind Local Executor", version="0.1.0")
+
+# Allow the web UI (often hosted on a different origin like Vercel) to call local executor endpoints.
+# This is intentionally permissive for local sandbox/demo usage.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+X402_STATE_PATH = (os.getenv("X402_STATE_PATH") or str(Path(__file__).resolve().parent / ".x402_sandbox_state.json")).strip()
+
+
+def _load_x402_state() -> Dict[str, Any]:
+    p = Path(X402_STATE_PATH)
+    if not p.exists():
+        # Create a fresh sandbox wallet with some initial balance (demo only)
+        state = {
+            "wallet_id": "x402_sandbox_" + secrets.token_hex(8),
+            "balance_usdc": "100.0",
+            "auth_enabled": False,
+            "created_at": int(time.time()),
+            "payments": [],
+        }
+        try:
+            p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            # If writing fails, fall back to in-memory-only behavior
+            return state
+        return state
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        # Corrupt file -> reset
+        return {
+            "wallet_id": "x402_sandbox_" + secrets.token_hex(8),
+            "balance_usdc": "100.0",
+            "auth_enabled": False,
+            "created_at": int(time.time()),
+            "payments": [],
+        }
+
+
+def _save_x402_state(state: Dict[str, Any]) -> None:
+    p = Path(X402_STATE_PATH)
+    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _parse_amount(amount_str: str) -> float:
+    try:
+        x = float(str(amount_str).strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid amount.")
+    if x <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be > 0.")
+    if x > 1_000_000:
+        raise HTTPException(status_code=400, detail="Amount too large for sandbox.")
+    return x
+
+
+@app.get("/x402/status")
+def x402_status():
+    """
+    Sandbox-only x402 wallet status.
+    This repo does NOT run the real OM1 x402 connector; this is a demo wallet/ledger so the UI can be built/tested.
+    """
+    s = _load_x402_state()
+    return {
+        "ok": True,
+        "sandbox": True,
+        "wallet": {
+            "wallet_id": s.get("wallet_id"),
+            "balance_usdc": s.get("balance_usdc"),
+            "auth_enabled": bool(s.get("auth_enabled")),
+        },
+        "payments_count": len(s.get("payments") or []),
+    }
+
+
+@app.post("/x402/authorize")
+async def x402_authorize(req: Request):
+    payload = await req.json()
+    if not isinstance(payload, dict) or "enabled" not in payload:
+        raise HTTPException(status_code=400, detail="Body must be {enabled: boolean}.")
+    enabled = bool(payload.get("enabled"))
+    s = _load_x402_state()
+    s["auth_enabled"] = enabled
+    _save_x402_state(s)
+    return {"ok": True, "sandbox": True, "auth_enabled": enabled}
+
+
+@app.post("/x402/faucet")
+async def x402_faucet(req: Request):
+    """
+    Sandbox-only faucet to top up the demo wallet without real money.
+    """
+    payload = await req.json()
+    if not isinstance(payload, dict) or "amount_usdc" not in payload:
+        raise HTTPException(status_code=400, detail="Body must be {amount_usdc: string|number}.")
+    amt = _parse_amount(payload.get("amount_usdc"))
+    s = _load_x402_state()
+    bal = float(s.get("balance_usdc") or "0")
+    s["balance_usdc"] = f"{bal + amt:.6f}".rstrip("0").rstrip(".")
+    _save_x402_state(s)
+    return {"ok": True, "sandbox": True, "balance_usdc": s["balance_usdc"]}
+
+
+@app.post("/x402/pay")
+async def x402_pay(req: Request):
+    """
+    Sandbox-only pay command. Requires auth_enabled=true.
+    """
+    payload = await req.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body must be an object.")
+    to = str(payload.get("to") or "").strip()
+    memo = str(payload.get("memo") or "").strip()
+    amt = _parse_amount(payload.get("amount_usdc"))
+    if not to:
+        raise HTTPException(status_code=400, detail="Missing 'to'.")
+
+    s = _load_x402_state()
+    if not bool(s.get("auth_enabled")):
+        raise HTTPException(status_code=403, detail="x402 authorization is disabled.")
+    bal = float(s.get("balance_usdc") or "0")
+    if bal < amt:
+        raise HTTPException(status_code=400, detail="Insufficient sandbox balance.")
+    bal2 = bal - amt
+    s["balance_usdc"] = f"{bal2:.6f}".rstrip("0").rstrip(".")
+    payment = {
+        "id": "pay_" + secrets.token_hex(10),
+        "ts": int(time.time()),
+        "to": to,
+        "amount_usdc": f"{amt:.6f}".rstrip("0").rstrip("."),
+        "memo": memo or None,
+    }
+    payments = s.get("payments")
+    if not isinstance(payments, list):
+        payments = []
+    payments.append(payment)
+    s["payments"] = payments[-200:]  # cap history
+    _save_x402_state(s)
+    return {"ok": True, "sandbox": True, "payment": payment, "balance_usdc": s["balance_usdc"]}
 
 
 def _hmac_sha256_hex(secret: str, data: str) -> str:

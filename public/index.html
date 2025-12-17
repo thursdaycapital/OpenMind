@@ -310,6 +310,69 @@
         </div>
       </div>
 
+      <div class="card" id="x402Card">
+        <div class="title">x402 钱包（沙盒演示，机器人侧托管）</div>
+        <div class="subtitle" style="margin: 0 0 12px 0">
+          说明：这里是“模拟 x402”的沙盒钱包与账本，钱包状态保存在本地 executor（不是浏览器）。
+          网页会根据你填写的 WS 地址派生出 HTTP(S) 地址来调用 executor 的 <span class="mono">/x402/*</span> 接口。
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Executor HTTP Base（自动从 WS 推导，可手动覆盖）</label>
+            <input id="x402HttpBase" placeholder="例如：https://xxxx.ngrok-free.app" />
+            <div class="hint">如果你只填了 WS（wss://.../ws），这里会自动填成 https://...。</div>
+          </div>
+          <div>
+            <label>授权开关（是否允许机器人发起支付）</label>
+            <select id="x402Auth">
+              <option value="off" selected>关闭（默认）</option>
+              <option value="on">开启</option>
+            </select>
+            <div class="hint">关闭时点击“支付”会被拒绝（沙盒演示）。</div>
+          </div>
+        </div>
+
+        <div style="height: 12px"></div>
+        <div class="row row-2">
+          <button id="btnX402Refresh" class="btn secondary">刷新状态</button>
+          <button id="btnX402Faucet" class="btn">沙盒充值（USDC）</button>
+        </div>
+
+        <div style="height: 10px"></div>
+        <div class="row">
+          <div>
+            <label>充值数量（USDC）</label>
+            <input id="x402FaucetAmount" value="10" />
+          </div>
+          <div>
+            <label>状态</label>
+            <pre id="x402StatusOut">未加载</pre>
+          </div>
+        </div>
+
+        <div style="height: 12px"></div>
+        <div class="row">
+          <div>
+            <label>支付对象（to）</label>
+            <input id="x402PayTo" placeholder="例如：electricity / compute / user:alice / 0xabc..." />
+          </div>
+          <div>
+            <label>支付金额（USDC）</label>
+            <input id="x402PayAmount" value="1" />
+          </div>
+        </div>
+        <div style="height: 10px"></div>
+        <label>备注（memo，可选）</label>
+        <input id="x402PayMemo" placeholder="例如：sandbox demo" />
+        <div style="height: 12px"></div>
+        <button id="btnX402Pay" class="btn">发起支付（沙盒）</button>
+
+        <div style="height: 10px"></div>
+        <label>结果</label>
+        <pre id="x402ResultOut">-</pre>
+      </div>
+
       <div class="card" id="walletCard">
         <div class="title" style="font-size: 16px; margin: 0 0 6px 0">
           钱包（MetaMask）一次授权：Approve USDC 给 Relayer（后续自动多笔）
@@ -619,6 +682,17 @@
       const robotUsdcAmount = $("robotUsdcAmount");
       const btnRobotFundGas = $("btnRobotFundGas");
       const btnRobotFundUsdc = $("btnRobotFundUsdc");
+      const x402HttpBase = $("x402HttpBase");
+      const x402Auth = $("x402Auth");
+      const btnX402Refresh = $("btnX402Refresh");
+      const btnX402Faucet = $("btnX402Faucet");
+      const x402FaucetAmount = $("x402FaucetAmount");
+      const x402StatusOut = $("x402StatusOut");
+      const x402PayTo = $("x402PayTo");
+      const x402PayAmount = $("x402PayAmount");
+      const x402PayMemo = $("x402PayMemo");
+      const btnX402Pay = $("btnX402Pay");
+      const x402ResultOut = $("x402ResultOut");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
@@ -628,6 +702,129 @@
       let signer = null;
       let walletAddress = "";
       let robotWallet = null;
+
+      function normalizeHttpBase(input) {
+        let u = (input || "").trim();
+        if (!u) return "";
+        // If user pastes ws/wss, convert to http/https.
+        if (u.startsWith("ws://")) u = "http://" + u.slice("ws://".length);
+        if (u.startsWith("wss://")) u = "https://" + u.slice("wss://".length);
+        // If user pastes host without scheme, assume https on remote, http on localhost.
+        const hasScheme = u.startsWith("http://") || u.startsWith("https://");
+        if (!hasScheme) {
+          const local =
+            location.hostname === "localhost" || location.hostname === "127.0.0.1";
+          u = (local ? "http://" : "https://") + u;
+        }
+        try {
+          const parsed = new URL(u);
+          // Strip path/query/hash; keep origin only.
+          return parsed.origin;
+        } catch {
+          return u.replace(/\/+$/, "");
+        }
+      }
+
+      function deriveHttpBaseFromWsField() {
+        const ws = (wsUrlInline?.value || wsUrl?.value || "").trim();
+        if (!ws) return "";
+        return normalizeHttpBase(ws);
+      }
+
+      async function x402Fetch(path, opts) {
+        const base =
+          normalizeHttpBase(x402HttpBase?.value) || deriveHttpBaseFromWsField();
+        if (!base) throw new Error("请先填写/连接 executor（WS URL 或 HTTP Base）。");
+        if (x402HttpBase && !x402HttpBase.value.trim()) x402HttpBase.value = base;
+        const url = base + path;
+        const r = await fetch(url, {
+          method: (opts && opts.method) || "GET",
+          headers: {
+            "content-type": "application/json",
+            ...((opts && opts.headers) || {}),
+          },
+          body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
+        });
+        const t = await r.text();
+        let data = null;
+        try {
+          data = JSON.parse(t);
+        } catch {
+          data = { raw: t };
+        }
+        if (!r.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            `HTTP ${r.status}`;
+          throw new Error(String(msg));
+        }
+        return data;
+      }
+
+      async function refreshX402Status() {
+        try {
+          const s = await x402Fetch("/x402/status");
+          if (x402StatusOut) x402StatusOut.textContent = JSON.stringify(s, null, 2);
+          if (x402Auth && s?.wallet) x402Auth.value = s.wallet.auth_enabled ? "on" : "off";
+          if (x402ResultOut) x402ResultOut.textContent = "-";
+          setError("");
+        } catch (e) {
+          setError("x402 状态获取失败：" + String(e?.message || e));
+        }
+      }
+
+      btnX402Refresh?.addEventListener("click", refreshX402Status);
+      x402Auth?.addEventListener("change", async () => {
+        try {
+          const enabled = x402Auth.value === "on";
+          const r = await x402Fetch("/x402/authorize", {
+            method: "POST",
+            body: { enabled },
+          });
+          if (x402ResultOut) x402ResultOut.textContent = JSON.stringify(r, null, 2);
+          await refreshX402Status();
+          setError("");
+        } catch (e) {
+          setError("x402 授权设置失败：" + String(e?.message || e));
+        }
+      });
+      btnX402Faucet?.addEventListener("click", async () => {
+        try {
+          const amt = String(x402FaucetAmount?.value || "10").trim() || "10";
+          const r = await x402Fetch("/x402/faucet", {
+            method: "POST",
+            body: { amount_usdc: amt },
+          });
+          if (x402ResultOut) x402ResultOut.textContent = JSON.stringify(r, null, 2);
+          await refreshX402Status();
+          setError("");
+        } catch (e) {
+          setError("x402 充值失败：" + String(e?.message || e));
+        }
+      });
+      btnX402Pay?.addEventListener("click", async () => {
+        try {
+          const to = String(x402PayTo?.value || "").trim();
+          const amt = String(x402PayAmount?.value || "1").trim() || "1";
+          const memo = String(x402PayMemo?.value || "").trim();
+          if (!to) return setError("请填写支付对象（to）。");
+          const r = await x402Fetch("/x402/pay", {
+            method: "POST",
+            body: { to, amount_usdc: amt, memo },
+          });
+          if (x402ResultOut) x402ResultOut.textContent = JSON.stringify(r, null, 2);
+          await refreshX402Status();
+          setError("");
+        } catch (e) {
+          setError("x402 支付失败：" + String(e?.message || e));
+        }
+      });
+
+      // Try to prefill http base from ws on load
+      if (x402HttpBase && !x402HttpBase.value.trim()) {
+        const b = deriveHttpBaseFromWsField();
+        if (b) x402HttpBase.value = b;
+      }
 
       function setRobotWallet(w) {
         robotWallet = w;
