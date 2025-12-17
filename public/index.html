@@ -3,62 +3,140 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OpenMind 网关测试台（BYOK）</title>
+    <title>OpenMind — Chat Console</title>
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/dist/ethers.umd.min.js"></script>
     <style>
       :root {
-        color-scheme: light dark;
-        --bg: #0b0f17;
-        --card: #121a28;
-        --text: #e6e9ef;
-        --muted: #9aa4b2;
-        --border: #243045;
-        --accent: #4f8cff;
-        --danger: #ff5c7a;
+        color-scheme: dark;
+        --bg: #070a10;
+        --bg2: #0b1020;
+        --surface: rgba(255, 255, 255, 0.06);
+        --surface-2: rgba(255, 255, 255, 0.04);
+        --border: rgba(255, 255, 255, 0.12);
+        --border-2: rgba(255, 255, 255, 0.08);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.68);
+        --muted-2: rgba(255, 255, 255, 0.52);
+        --brand: #6ea8ff;
+        --brand-2: #3b82f6;
+        --danger: #ff4d6d;
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        --radius: 16px;
+        --radius-sm: 12px;
       }
       @media (prefers-color-scheme: light) {
         :root {
-          --bg: #f6f7fb;
-          --card: #ffffff;
-          --text: #111827;
-          --muted: #6b7280;
-          --border: #e5e7eb;
-          --accent: #2563eb;
+          color-scheme: light;
+          --bg: #f7f7fb;
+          --bg2: #ffffff;
+          --surface: rgba(17, 24, 39, 0.04);
+          --surface-2: rgba(17, 24, 39, 0.03);
+          --border: rgba(17, 24, 39, 0.10);
+          --border-2: rgba(17, 24, 39, 0.08);
+          --text: rgba(17, 24, 39, 0.92);
+          --muted: rgba(17, 24, 39, 0.66);
+          --muted-2: rgba(17, 24, 39, 0.52);
+          --brand: #2563eb;
+          --brand-2: #1d4ed8;
           --danger: #e11d48;
+          --shadow: 0 18px 60px rgba(17, 24, 39, 0.10);
         }
+      }
+      html,
+      body {
+        height: 100%;
       }
       body {
         margin: 0;
         font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
-          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-        background: var(--bg);
+          Helvetica, Arial;
+        background:
+          radial-gradient(1200px 600px at 20% -10%, rgba(110, 168, 255, 0.25), transparent 55%),
+          radial-gradient(900px 500px at 90% 10%, rgba(59, 130, 246, 0.18), transparent 60%),
+          radial-gradient(900px 700px at 50% 100%, rgba(255, 77, 109, 0.10), transparent 55%),
+          linear-gradient(180deg, var(--bg), var(--bg2));
+        color: var(--text);
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 0.95em;
         color: var(--text);
       }
       .wrap {
-        max-width: 960px;
-        margin: 40px auto;
-        padding: 0 16px;
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 24px 18px 56px;
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0 18px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+      }
+      .brand-mark {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, rgba(110, 168, 255, 1), rgba(59, 130, 246, 1));
+        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.25);
+      }
+      .nav-links {
+        display: flex;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .hero {
+        padding: 10px 0 18px;
       }
       .title {
-        font-size: 22px;
-        font-weight: 700;
-        margin-bottom: 6px;
+        font-size: 28px;
+        font-weight: 850;
+        letter-spacing: -0.02em;
+        margin: 6px 0 8px;
       }
       .subtitle {
         color: var(--muted);
-        margin-bottom: 18px;
-        line-height: 1.4;
+        line-height: 1.5;
+        margin: 0 0 10px;
+        max-width: 78ch;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
       }
       .card {
-        background: var(--card);
+        background: linear-gradient(180deg, var(--surface), var(--surface-2));
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: var(--radius);
         padding: 16px;
-        margin-bottom: 16px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
+      .card + .card {
+        margin-top: 14px;
+      }
+      .card .title {
+        font-size: 16px;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
       }
       label {
         display: block;
-        font-size: 13px;
+        font-size: 12px;
         color: var(--muted);
         margin-bottom: 6px;
       }
@@ -67,43 +145,76 @@
       select {
         width: 100%;
         box-sizing: border-box;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 10px 12px;
-        background: transparent;
+        border: 1px solid var(--border-2);
+        border-radius: var(--radius-sm);
+        padding: 11px 12px;
+        background: rgba(0, 0, 0, 0.12);
         color: var(--text);
         outline: none;
       }
+      @media (prefers-color-scheme: light) {
+        input,
+        textarea,
+        select {
+          background: rgba(255, 255, 255, 0.7);
+        }
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        border-color: rgba(110, 168, 255, 0.55);
+        box-shadow: 0 0 0 4px rgba(110, 168, 255, 0.16);
+      }
       textarea {
-        min-height: 120px;
+        min-height: 110px;
         resize: vertical;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
           "Liberation Mono", "Courier New", monospace;
-        font-size: 13px;
-        line-height: 1.35;
+        font-size: 12px;
+        line-height: 1.4;
       }
       .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 12px;
       }
-      @media (max-width: 800px) {
+      .row.row-tight {
+        grid-template-columns: 1fr auto;
+        align-items: end;
+      }
+      .row.row-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      @media (max-width: 860px) {
         .row {
           grid-template-columns: 1fr;
         }
+        .title {
+          font-size: 24px;
+        }
+        .nav-links {
+          display: none;
+        }
       }
       .btn {
-        background: var(--accent);
-        color: white;
+        background: linear-gradient(135deg, var(--brand), var(--brand-2));
+        color: rgba(255, 255, 255, 0.96);
         border: 0;
-        border-radius: 10px;
-        padding: 10px 14px;
-        font-weight: 700;
+        border-radius: var(--radius-sm);
+        padding: 11px 14px;
+        font-weight: 800;
         cursor: pointer;
+        box-shadow: 0 12px 30px rgba(59, 130, 246, 0.22);
       }
       .btn:disabled {
         opacity: 0.6;
         cursor: not-allowed;
+      }
+      .btn.secondary {
+        background: transparent;
+        border: 1px solid var(--border-2);
+        color: var(--text);
+        box-shadow: none;
       }
       .warn {
         color: var(--danger);
@@ -117,21 +228,62 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
           "Liberation Mono", "Courier New", monospace;
         font-size: 12px;
-        line-height: 1.4;
+        line-height: 1.45;
+        color: var(--text);
+        background: rgba(0, 0, 0, 0.14);
+        border: 1px solid var(--border-2);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+      }
+      @media (prefers-color-scheme: light) {
+        pre {
+          background: rgba(255, 255, 255, 0.7);
+        }
       }
       .hint {
-        color: var(--muted);
+        color: var(--muted-2);
         font-size: 12px;
         margin-top: 6px;
+      }
+      .kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 8px;
+        border: 1px solid var(--border-2);
+        color: var(--muted);
+      }
+      #chatLog,
+      #wsLog {
+        max-height: 420px;
+        overflow: auto;
+      }
+      #chatLog {
+        min-height: 220px;
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <div class="title">OpenMind × 机器人 × 链上执行（单窗口聊天）</div>
-      <div class="subtitle">
-        在同一个聊天窗口里：用户输入 → OpenMind 生成回复与 <code>commands</code> → 若包含 <code>chain_execute</code>，点击“确认执行”后才会转发到本地 executor/chain-service。<br />
-        注意：页面不会持久化保存 key，但浏览器环境本身无法提供绝对安全保证；请只在你信任的域名上使用。
+      <div class="nav">
+        <div class="brand">
+          <div class="brand-mark"></div>
+          <div>OpenMind</div>
+        </div>
+        <div class="nav-links">
+          <a href="https://openmind.org/" target="_blank" rel="noreferrer">Home</a>
+          <span style="opacity:.55">/</span>
+          <span>Chat Console</span>
+          <span style="opacity:.55">/</span>
+          <span class="kbd">Testnet</span>
+        </div>
+      </div>
+      <div class="hero">
+        <div class="title">Chat Console</div>
+        <div class="subtitle">
+          在同一个窗口里：聊天 → 工具调用 → 执行（本地 executor / chain-service）。建议优先用测试网，并把授权额度设置为小值。
+        </div>
       </div>
 
       <div class="card" id="setupCard">
@@ -176,11 +328,7 @@
         <div style="height: 10px"></div>
         <div class="row">
           <button id="btnConnectWallet" class="btn">连接 MetaMask</button>
-          <button
-            id="btnSwitchChain"
-            class="btn"
-            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
-          >
+          <button id="btnSwitchChain" class="btn secondary">
             切换到 ARC Testnet
           </button>
         </div>
@@ -214,11 +362,7 @@
         <div style="height: 12px"></div>
         <div class="row">
           <button id="btnApprove" class="btn">发起 Approve</button>
-          <button
-            id="btnRefreshAllowance"
-            class="btn"
-            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
-          >
+          <button id="btnRefreshAllowance" class="btn secondary">
             刷新 Allowance
           </button>
         </div>
@@ -295,27 +439,19 @@
         <div style="height: 10px"></div>
         <div class="row">
           <button id="wsConnectBtnInline" class="btn">连接机器人（WS）</button>
-          <button
-            id="wsDisconnectBtnInline"
-            class="btn"
-            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
-          >
+          <button id="wsDisconnectBtnInline" class="btn secondary">
             断开机器人（WS）
           </button>
         </div>
         <div style="height: 12px"></div>
-        <div class="row">
+        <div class="row row-tight">
           <input id="userText" placeholder="例如：帮我转 0.1 USDC 到 0x..." />
           <button id="sendBtn" class="btn">发送</button>
         </div>
         <div style="height: 12px"></div>
-        <div class="row">
+        <div class="row row-2">
           <button id="btnChatConfirm" class="btn">确认</button>
-          <button
-            id="btnChatCancel"
-            class="btn"
-            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
-          >
+          <button id="btnChatCancel" class="btn secondary">
             取消
           </button>
         </div>
@@ -366,11 +502,7 @@
         <div class="row">
           <button id="btnConfirmExecute" class="btn">确认执行（/api/execute）</button>
           <button id="btnWsConfirm" class="btn">确认（WS）</button>
-          <button
-            id="btnCancel"
-            class="btn"
-            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
-          >
+          <button id="btnCancel" class="btn secondary">
             取消
           </button>
         </div>
