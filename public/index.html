@@ -229,11 +229,21 @@
 
       <div class="card">
         <label>System Prompt（可选）</label>
-        <input
+        <textarea
           id="system"
-          placeholder="You are a helpful robot."
-          value="You are a helpful robot.\n\nImportant: You must output a JSON array of commands ONLY (no markdown) when the user asks you to transfer on testnet. Each command must be an object like {\"type\":\"chain_execute\",\"value\":{...}}.\n- For USDC transfers using relayer allowance, use value.type=\"transfer_from_erc20\" with fields: token_address, from, to, amount (string), decimals:6, expected_chain_id.\n- For batch, include value.times=N.\nIf the user is not asking for a transaction, reply normally in Chinese."
-        />
+          placeholder="你是一个机器人助手。"
+        >你是一个机器人助手，负责用中文对话，并在测试网执行链上动作（仅测试网）。
+
+当用户表达“转账/发送 USDC”等意图时，你必须输出 **纯 JSON**（不要 Markdown/不要多余文字），格式为：
+{"commands":[{"type":"chain_execute","value":{...}}]}
+
+规则：
+- 使用 allowance 模式：USDC 转账必须使用 value.type="transfer_from_erc20"
+- 字段：token_address, from, to, amount(字符串), decimals:6, expected_chain_id
+- 批量：使用 value.times=N
+- 不要输出私钥，不要要求用户提供私钥
+
+当用户不是在请求交易时，你可以正常中文回复。</textarea>
         <div style="height: 12px"></div>
         <label>聊天记录</label>
         <pre id="chatLog">尚未开始对话。</pre>
@@ -248,8 +258,23 @@
             <div class="hint">开启后将跳过“确认执行”点击步骤，直接在对话里执行链上交易（仅建议测试网）。</div>
           </div>
           <div>
+            <label>强制命令模式（JSON）</label>
+            <select id="forceJson">
+              <option value="on" selected>开启（建议）</option>
+              <option value="off">关闭</option>
+            </select>
+            <div class="hint">开启时会请求模型返回 JSON（commands），便于自动执行。</div>
+          </div>
+        </div>
+        <div style="height: 12px"></div>
+        <div class="row">
+          <div>
             <label>执行模式</label>
             <pre id="execMode">需要点击“确认执行（/api/execute）”</pre>
+          </div>
+          <div>
+            <label>提示</label>
+            <pre id="cmdHint">如果模型没有返回 commands，请让它“只输出 JSON commands”。</pre>
           </div>
         </div>
         <div style="height: 12px"></div>
@@ -342,7 +367,9 @@
       const btnApprove = $("btnApprove");
       const btnRefreshAllowance = $("btnRefreshAllowance");
       const autoExecuteSel = $("autoExecute");
+      const forceJsonSel = $("forceJson");
       const execMode = $("execMode");
+      const cmdHint = $("cmdHint");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
@@ -517,6 +544,12 @@
                 { role: "system", content: system },
                 { role: "user", content: userText },
               ],
+              ...(forceJsonSel.value === "on"
+                ? {
+                    // OpenAI-compatible hint to return JSON object. If unsupported, it should be ignored.
+                    response_format: { type: "json_object" },
+                  }
+                : {}),
             },
           },
           // Do NOT auto-forward before user confirms. We'll call /api/execute after confirmation.
@@ -586,6 +619,9 @@
                 chatLog.textContent += `\n[执行结果] 失败：${String(e2)}`;
               }
             }
+          } else {
+            cmdHint.textContent =
+              "模型未返回 commands。你可以再发一句：请只输出 JSON（{\"commands\":[...] }），不要解释。";
           }
         } catch (e) {
           setError(String(e));
