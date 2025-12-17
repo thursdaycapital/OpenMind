@@ -18,6 +18,11 @@ EXECUTOR_CHAIN_LOCAL_TOKEN = os.getenv("EXECUTOR_CHAIN_LOCAL_TOKEN", "")
 DEFAULT_RPC_URL = (os.getenv("DEFAULT_RPC_URL") or "https://rpc.testnet.arc.network").strip()
 DEFAULT_CHAIN_ID = int(os.getenv("DEFAULT_CHAIN_ID") or "5042002")
 DEFAULT_USDC_ADDRESS = (os.getenv("DEFAULT_USDC_ADDRESS") or "0x3600000000000000000000000000000000000000").strip()
+EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY = (os.getenv("EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY") or "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 app = FastAPI(title="OpenMind Local Executor", version="0.1.0")
 
@@ -99,6 +104,83 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
     return {"_needs_token": True, "to": to, "amount": amount}
 
 
+def _extract_commands(openmind_response: Any) -> list[Dict[str, Any]]:
+    """
+    Best-effort extractor for OM1/OpenMind style command outputs.
+
+    Supported shapes (best effort):
+    - {"commands":[{"type":"move","value":"..."}]}
+    - {"commands":[{"type":"chain_execute","value":{...}}]}
+    - OpenAI-like: {"choices":[{"message":{"content":"..."}}]}  (JSON list or JSON object in content)
+    """
+
+    if not openmind_response:
+        return []
+
+    if isinstance(openmind_response, dict):
+        cmds = openmind_response.get("commands")
+        if isinstance(cmds, list):
+            out: list[Dict[str, Any]] = []
+            for c in cmds:
+                if isinstance(c, dict) and isinstance(c.get("type"), str):
+                    out.append(c)
+            return out
+
+        # OpenAI-ish message.content that might contain JSON
+        try:
+            content = (
+                openmind_response.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", None)
+            )
+        except Exception:
+            content = None
+        if isinstance(content, str) and content.strip():
+            s = content.strip()
+            # If model returned JSON in plain text, try parse.
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                return []
+            if isinstance(parsed, list):
+                return [c for c in parsed if isinstance(c, dict) and isinstance(c.get("type"), str)]
+            if isinstance(parsed, dict) and isinstance(parsed.get("type"), str):
+                return [parsed]
+            if isinstance(parsed, dict) and isinstance(parsed.get("commands"), list):
+                return [c for c in parsed["commands"] if isinstance(c, dict) and isinstance(c.get("type"), str)]
+
+    return []
+
+
+async def _execute_chain_command(value: Any) -> Dict[str, Any]:
+    """
+    Execute a chain command where value is either:
+      - dict payload for chain-service (recommended)
+      - JSON string payload
+    """
+
+    payload: Any = value
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return {"ok": False, "error": "chain_execute value must be JSON object or JSON string"}
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "chain_execute payload must be an object"}
+
+    # Support batch execution if payload includes "times"
+    times = int(payload.get("times") or 1)
+    times = max(1, min(times, 50))
+    base = dict(payload)
+    base.pop("times", None)
+
+    results = []
+    for i in range(times):
+        r = await chain_execute(base)
+        results.append({"index": i + 1, "total": times, "result": r})
+    return {"ok": True, "times": times, "results": results}
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
@@ -148,11 +230,28 @@ async def execute(
     openmind_status = payload.get("openmind_status")
     openmind_response = payload.get("openmind_response")
 
+    executed: list[Dict[str, Any]] = []
+    if EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY:
+        cmds = _extract_commands(openmind_response)
+        for c in cmds:
+            ctype = c.get("type")
+            # Accept either "value" or "payload"
+            cvalue = c.get("value", c.get("payload"))
+            if ctype in ("chain_execute", "wallet_send", "wallet_sign"):
+                executed.append(
+                    {
+                        "type": "chain_execute",
+                        "input": cvalue,
+                        "output": await _execute_chain_command(cvalue),
+                    }
+                )
+
     return {
         "accepted": True,
         "openmind_status": openmind_status,
         "note": "MVP executor: not executing hardware actions yet (only returns payload).",
         "openmind_response_preview": openmind_response,
+        "executed": executed,
     }
 
 

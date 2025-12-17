@@ -116,4 +116,33 @@ curl -sS http://127.0.0.1:8787/chain/execute \
 - `RPC_URL`
 - `PRIVATE_KEY`
 
+## 接入 OM1（让 OM1 的 action 触发链上动作）
+
+官方 OM1 的运行与 conversation 参考：
+- [Get started / Installation Guide](https://docs.openmind.org/developing/1_get-started)
+- [Tutorials / Conversation](https://docs.openmind.org/examples/conversation)
+
+### 推荐集成形态（最少改动 OM1）
+
+1) **OM1 只负责“思考/输出 commands”**  
+   让 OM1（或 OpenMind chat endpoint）输出结构化 `commands`，其中包含：
+   - `type: "chain_execute"`
+   - `value: { ...链上payload... }`
+
+2) **Vercel 网关转发 OpenMind/OM1 输出到本地 executor**  
+   你已经有 `api/dispatch.ts` → executor `/execute` 的签名转发链路。
+
+3) **本地 executor 自动执行 chain_execute**  
+   在本仓库里，executor 支持从 `/execute` 的 `openmind_response.commands` 中提取 `chain_execute` 并执行（需要你显式开启环境变量）：
+
+   - `EXECUTOR_ENABLE_CHAIN_FROM_GATEWAY=true`
+
+> 说明：这是把“action 执行”放在你本地机器上，避免把私钥/交易能力暴露到云端。
+
+### OM1 config 示例
+
+本仓库提供一个模板：`config/om1.conversation.chain_action.json5`  
+把里面的 `agent_actions` 片段复制到你 OM1 的 conversation agent 配置里，让模型“知道”可以输出 `chain_execute`。
+
+
 

@@ -1,0 +1,43 @@
+// Example OM1 config snippet showing how to "expose" a chain action to the LLM.
+// This repo does not include OM1 itself; you should copy relevant parts into your OM1 agent config.
+//
+// References:
+// - OM1 run/config basics: https://docs.openmind.org/developing/1_get-started
+// - Conversation tutorial: https://docs.openmind.org/examples/conversation
+//
+// Key idea:
+// - Add a new action label that the LLM is allowed to output (e.g. chain_execute)
+// - Our local executor can then execute that command when Vercel forwards OM1/OpenMind responses.
+{
+  // In OM1, this is typically inside your agent config (e.g. conversation.json5).
+  // The exact schema may vary by OM1 version; treat this as a template.
+  agent_actions: [
+    {
+      name: "chain_execute",
+      llm_label: "chain_execute",
+      connector: "local_executor",
+      config: {
+        // Human-readable description for the model
+        description: "Execute a testnet onchain action. Use ONLY testnet. Requires confirmation if running in production.",
+        // JSON schema-ish hint for arguments
+        arguments: {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["transfer_erc20", "transfer_native", "contract_call"] },
+            to: { type: "string", description: "Recipient address (0x...)" },
+            amount: { type: "string", description: "ERC20 amount in decimal string (e.g. 0.1)" },
+            decimals: { type: "number", description: "Token decimals (USDC=6)" },
+            token_address: { type: "string", description: "ERC20 token contract address" },
+            amount_eth: { type: "string", description: "Native amount in ETH-like units (e.g. 0.001)" },
+            expected_chain_id: { type: "number" },
+            rpc_url: { type: "string" },
+            times: { type: "number", description: "Batch count (optional)" }
+          },
+          required: ["type"]
+        }
+      }
+    }
+  ]
+}
+
+
