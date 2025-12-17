@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Local chain service for OM1 executor: testnet native transfer + generic contract calls (ethers).",
   "dependencies": {
+    "dotenv": "16.4.5",
     "ethers": "6.15.0"
   },
   "scripts": {

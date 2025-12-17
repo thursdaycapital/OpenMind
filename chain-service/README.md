@@ -14,6 +14,24 @@ npm install
 RPC_URL="https://..." PRIVATE_KEY="0x..." npm start
 ```
 
+#### 推荐：用 .env（不要提交到 Git）
+
+在 `chain-service/.env` 里写：
+
+```bash
+RPC_URL=https://rpc.testnet.arc.network
+EXPECTED_CHAIN_ID=5042002
+PRIVATE_KEY=0x你的私钥（请只放本机，不要发到聊天/不要提交Git）
+```
+
+然后运行：
+
+```bash
+cd chain-service
+npm install
+npm start
+```
+
 Optional:
 - `CHAIN_SERVICE_PORT` (default `8790`)
 - `CHAIN_SERVICE_SHARED_SECRET` (if set, requests must include header `x-chain-secret`)
