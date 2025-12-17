@@ -1,3 +1,5 @@
+import * as crypto from "crypto";
+
 type X402Payment = {
   id: string;
   ts: number;
@@ -32,9 +34,6 @@ function nowSec() {
 }
 
 function randomHex(bytes: number) {
-  // Node.js runtime in Vercel functions provides crypto.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const crypto = require("crypto");
   return crypto.randomBytes(bytes).toString("hex");
 }
 
