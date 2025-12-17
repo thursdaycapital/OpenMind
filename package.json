@@ -7,6 +7,9 @@
   "scripts": {
     "lint": "node -c api/dispatch.ts"
   },
+  "dependencies": {
+    "@vercel/speed-insights": "^1.0.12"
+  },
   "devDependencies": {
     "@types/node": "22.10.2"
   }
