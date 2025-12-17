@@ -456,11 +456,26 @@
         setError("");
         const apiKey = $("apiKey").value.trim();
         const model = $("model").value.trim() || "gpt-4.1-mini";
-        const system = $("system").value.trim() || "You are a helpful robot.";
+        let system = $("system").value.trim() || "You are a helpful robot.";
         const userText = $("userText").value.trim();
 
         if (!apiKey) return setError("请填写 OpenMind API Key。");
         if (!userText) return setError("请填写用户输入文本。");
+
+        // If wallet connected, provide context so the model outputs allowance-based commands.
+        // This keeps keys user-controlled and enables relayer transferFrom after approve.
+        const relayer = (relayerAddressEl.value || "").trim();
+        const usdc = (usdcAddressEl.value || "").trim();
+        if (walletAddress && relayer && usdc) {
+          system +=
+            `\n\n[Onchain tool instructions]\n` +
+            `- The user's wallet address is ${walletAddress}.\n` +
+            `- USDC token_address is ${usdc} (decimals=6) on chain_id ${publicCfg?.chain_id || 5042002}.\n` +
+            `- Relayer address (spender) is ${relayer}. The user will approve allowance to this relayer.\n` +
+            `- If the user asks to send USDC, output commands with type="chain_execute" and value using type="transfer_from_erc20" with fields: {token_address, from, to, amount, decimals:6, expected_chain_id}.\n` +
+            `- For multiple payments, set value.times=N.\n` +
+            `- Do not include private keys.\n`;
+        }
 
         btn.disabled = true;
         btn.textContent = "发送中…";

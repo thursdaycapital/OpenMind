@@ -153,6 +153,42 @@ async function handleExecute(payload) {
     };
   }
 
+  if (type === "transfer_from_erc20") {
+    const token = payload?.token_address;
+    const from = payload?.from;
+    const to = payload?.to;
+    const amount = payload?.amount; // string
+    const decimals = payload?.decimals ?? 6;
+    if (typeof token !== "string" || !token) throw new Error("Missing token_address");
+    if (typeof from !== "string" || !from) throw new Error("Missing from");
+    if (typeof to !== "string" || !to) throw new Error("Missing to");
+    if (typeof amount !== "string" || !amount) {
+      throw new Error('Missing amount (string), e.g. "1.5"');
+    }
+    const d = Number(decimals);
+    if (!Number.isFinite(d) || d < 0 || d > 36) throw new Error("Invalid decimals");
+
+    const abi = [
+      "function transferFrom(address from, address to, uint256 amount) returns (bool)",
+    ];
+    const contract = new ethers.Contract(token, abi, wallet);
+    const value = ethers.parseUnits(amount, d);
+    const tx = await contract.transferFrom(from, to, value);
+    const receipt = await tx.wait();
+    return {
+      ok: true,
+      type,
+      relayer: wallet.address,
+      from,
+      token_address: token,
+      to,
+      amount_units: value.toString(),
+      decimals: d,
+      tx_hash: tx.hash,
+      receipt_status: receipt?.status ?? null,
+    };
+  }
+
   if (type === "contract_call") {
     const to = payload?.to;
     const abi = payload?.abi;
@@ -184,7 +220,7 @@ async function handleExecute(payload) {
 
   // Swap + NFT mint are covered via contract_call (router / mint function).
   throw new Error(
-    `Unsupported type: ${type}. Use "get_code", "erc20_metadata", "transfer_native", "transfer_erc20", or "contract_call".`,
+    `Unsupported type: ${type}. Use "get_code", "erc20_metadata", "transfer_native", "transfer_erc20", "transfer_from_erc20", or "contract_call".`,
   );
 }
 

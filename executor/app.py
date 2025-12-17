@@ -53,11 +53,12 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
     if not t:
         return None
 
-    # Must contain a destination address
-    m_addr = _ADDR_RE.search(t)
-    if not m_addr:
+    # Addresses: allow "from -> to" if user provides two addresses
+    addrs = _ADDR_RE.findall(t)
+    if not addrs:
         return None
-    to = m_addr.group(1)
+    to = addrs[-1]
+    from_addr = addrs[0] if len(addrs) >= 2 else None
 
     # Optional: how many times
     times = 1
@@ -79,6 +80,19 @@ def _parse_cn_transfer(text: str) -> Optional[Dict[str, Any]]:
     is_eth = ("eth" in lower) or ("原生" in t) or ("主币" in t)
 
     if is_usdc:
+        # If user provided a source address, use transferFrom (relayer spends allowance)
+        if from_addr:
+            return {
+                "type": "transfer_from_erc20",
+                "rpc_url": DEFAULT_RPC_URL,
+                "expected_chain_id": DEFAULT_CHAIN_ID,
+                "token_address": DEFAULT_USDC_ADDRESS,
+                "from": from_addr,
+                "to": to,
+                "amount": amount,
+                "decimals": 6,
+                "times": times,
+            }
         return {
             "type": "transfer_erc20",
             "rpc_url": DEFAULT_RPC_URL,

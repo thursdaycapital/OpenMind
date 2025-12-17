@@ -124,6 +124,18 @@ curl -sS http://127.0.0.1:8787/chain/execute \
 - `RPC_URL`
 - `PRIVATE_KEY`
 
+### 为什么你“approve 了但机器人还是发不出去”
+
+如果你希望“用户钱包只授权一次，后续自动多笔”，链路必须是：
+- 用户钱包：`approve(USDC, spender=RELAYER_ADDRESS, limit)`
+- relayer（本地 chain-service）：用自己的 gas 调用 `USDC.transferFrom(user, to, amount)`（会消耗 allowance）
+
+常见失败原因：
+- **allowance 不够**：需要先 approve 或提高限额
+- **用户 USDC 余额不足**
+- **relayer 没有原生币 gas**（relayer 要付 gas）
+- **executor 指向了错误的 chain-service 端口**（导致读不到 `.env` / RPC）
+
 ## 接入 OM1（让 OM1 的 action 触发链上动作）
 
 官方 OM1 的运行与 conversation 参考：

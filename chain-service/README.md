@@ -71,6 +71,19 @@ Example USDC transfer (ERC20):
 }
 ```
 
+Example USDC transferFrom (relayer spends user's allowance):
+
+```json
+{
+  "type": "transfer_from_erc20",
+  "token_address": "0xUSDC_CONTRACT",
+  "from": "0xUSER_WALLET",
+  "to": "0xRECIPIENT",
+  "amount": "0.1",
+  "decimals": 6
+}
+```
+
 Example contract call (e.g., mint/swap):
 
 ```json
