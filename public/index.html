@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenMind 网关测试台（BYOK）</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/dist/ethers.umd.min.js"></script>
     <style>
       :root {
         color-scheme: light dark;
@@ -153,6 +154,79 @@
         </div>
       </div>
 
+      <div class="card" id="walletCard">
+        <div class="title" style="font-size: 16px; margin: 0 0 6px 0">
+          钱包（MetaMask）一次授权：Approve USDC 给 Relayer（后续自动多笔）
+        </div>
+        <div class="subtitle" style="margin: 0 0 12px 0">
+          这一步用的是“用户控钥”：私钥不进入前端代码、更不会上传到 Vercel。你只需要连接 MetaMask 并做一次 Approve（限额）。之后由本地 Relayer/Executor 代你多笔执行。
+        </div>
+
+        <div class="row">
+          <div>
+            <label>钱包状态</label>
+            <pre id="walletStatus">未连接</pre>
+          </div>
+          <div>
+            <label>网络配置（从 /api/public-config 读取）</label>
+            <pre id="chainStatus">未加载</pre>
+          </div>
+        </div>
+
+        <div style="height: 10px"></div>
+        <div class="row">
+          <button id="btnConnectWallet" class="btn">连接 MetaMask</button>
+          <button
+            id="btnSwitchChain"
+            class="btn"
+            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
+          >
+            切换到 ARC Testnet
+          </button>
+        </div>
+
+        <div style="height: 12px"></div>
+        <div class="row">
+          <div>
+            <label>USDC 合约地址</label>
+            <input id="usdcAddress" placeholder="0x..." />
+          </div>
+          <div>
+            <label>Relayer 地址（spender）</label>
+            <input id="relayerAddress" placeholder="0x...（你的本地 relayer 地址）" />
+            <div class="hint">建议在 Vercel 环境变量里设置 RELAYER_ADDRESS，让这里自动填充。</div>
+          </div>
+        </div>
+
+        <div style="height: 12px"></div>
+        <div class="row">
+          <div>
+            <label>Approve 限额（USDC）</label>
+            <input id="approveLimit" value="2" />
+            <div class="hint">例如填 2，表示最多允许 relayer 总共花你 2 USDC（你可随时 revoke）。</div>
+          </div>
+          <div>
+            <label>当前 Allowance（只读）</label>
+            <pre id="allowanceOut">-</pre>
+          </div>
+        </div>
+
+        <div style="height: 12px"></div>
+        <div class="row">
+          <button id="btnApprove" class="btn">发起 Approve</button>
+          <button
+            id="btnRefreshAllowance"
+            class="btn"
+            style="background: transparent; border: 1px solid var(--border); color: var(--text)"
+          >
+            刷新 Allowance
+          </button>
+        </div>
+        <div class="warn" style="margin-top: 10px">
+          注意：Approve 相当于授权额度。请只对你信任的 relayer 地址授权，测试网也建议设置小额度。
+        </div>
+      </div>
+
       <div class="card">
         <label>System Prompt（可选）</label>
         <input
@@ -213,7 +287,8 @@
 
         <div style="height: 12px"></div>
         <div class="row">
-          <button id="btnConfirm" class="btn">确认</button>
+          <button id="btnConfirmExecute" class="btn">确认执行（/api/execute）</button>
+          <button id="btnWsConfirm" class="btn">确认（WS）</button>
           <button
             id="btnCancel"
             class="btn"
@@ -237,12 +312,28 @@
       const wsDisconnectBtn = $("wsDisconnectBtn");
       const wsSendBtn = $("wsSendBtn");
       const wsMsg = $("wsMsg");
-      const btnConfirm = $("btnConfirm");
+      const btnConfirmExecute = $("btnConfirmExecute");
+      const btnWsConfirm = $("btnWsConfirm");
       const btnCancel = $("btnCancel");
+
+      const walletStatus = $("walletStatus");
+      const chainStatus = $("chainStatus");
+      const btnConnectWallet = $("btnConnectWallet");
+      const btnSwitchChain = $("btnSwitchChain");
+      const usdcAddressEl = $("usdcAddress");
+      const relayerAddressEl = $("relayerAddress");
+      const approveLimitEl = $("approveLimit");
+      const allowanceOut = $("allowanceOut");
+      const btnApprove = $("btnApprove");
+      const btnRefreshAllowance = $("btnRefreshAllowance");
 
       let sock = null;
       let lastOpenMindPayloadForExecutor = null; // used for confirm-to-execute
       let lastCommands = null;
+      let publicCfg = null;
+      let walletProvider = null;
+      let signer = null;
+      let walletAddress = "";
 
       function setError(message) {
         if (!message) {
@@ -449,7 +540,7 @@
       });
 
       // Confirm-to-execute from the same window
-      btnConfirm.addEventListener("click", async () => {
+      btnConfirmExecute.addEventListener("click", async () => {
         if (!lastOpenMindPayloadForExecutor) {
           logLine("[ui] 没有可执行的 payload（请先发送一条消息）。");
           return;
@@ -476,8 +567,135 @@
       wsMsg.addEventListener("keydown", (e) => {
         if (e.key === "Enter") sendWs(wsMsg.value.trim());
       });
-      btnConfirm.addEventListener("click", () => sendWs("确认"));
+      btnWsConfirm.addEventListener("click", () => sendWs("确认"));
       btnCancel.addEventListener("click", () => sendWs("取消"));
+
+      // ---- MetaMask + Approve flow (Allowance-based MVP) ----
+      async function loadPublicConfig() {
+        try {
+          const r = await fetch("/api/public-config");
+          const cfg = await r.json();
+          publicCfg = cfg;
+          chainStatus.textContent = JSON.stringify(cfg, null, 2);
+          if (!usdcAddressEl.value) usdcAddressEl.value = cfg.usdc_address || "";
+          if (!relayerAddressEl.value) relayerAddressEl.value = cfg.relayer_address || "";
+        } catch (e) {
+          chainStatus.textContent = "加载失败: " + String(e);
+        }
+      }
+
+      function hexChainId(n) {
+        return "0x" + Number(n).toString(16);
+      }
+
+      async function connectWallet() {
+        if (!window.ethereum) {
+          walletStatus.textContent = "未检测到 MetaMask（window.ethereum 不存在）";
+          return;
+        }
+        try {
+          walletProvider = new ethers.BrowserProvider(window.ethereum);
+          await walletProvider.send("eth_requestAccounts", []);
+          signer = await walletProvider.getSigner();
+          walletAddress = await signer.getAddress();
+          const net = await walletProvider.getNetwork();
+          walletStatus.textContent = JSON.stringify(
+            { connected: true, address: walletAddress, chain_id: Number(net.chainId) },
+            null,
+            2
+          );
+        } catch (e) {
+          walletStatus.textContent = "连接失败: " + String(e);
+        }
+      }
+
+      async function switchToArcTestnet() {
+        if (!window.ethereum) return;
+        const cfg = publicCfg || {};
+        const chainId = Number(cfg.chain_id || 5042002);
+        const rpcUrl = String(cfg.rpc_url || "https://rpc.testnet.arc.network");
+        const explorer = String(cfg.explorer_url || "https://testnet.arcscan.app");
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: hexChainId(chainId) }],
+          });
+        } catch (e) {
+          // If not added, try add
+          try {
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [
+                {
+                  chainId: hexChainId(chainId),
+                  chainName: "ARC Testnet",
+                  rpcUrls: [rpcUrl],
+                  blockExplorerUrls: [explorer],
+                  nativeCurrency: { name: "ARC", symbol: "ARC", decimals: 18 },
+                },
+              ],
+            });
+          } catch (e2) {
+            walletStatus.textContent = "切换网络失败: " + String(e2);
+          }
+        }
+      }
+
+      async function refreshAllowance() {
+        try {
+          if (!walletProvider || !signer) {
+            allowanceOut.textContent = "请先连接钱包";
+            return;
+          }
+          const owner = walletAddress || (await signer.getAddress());
+          const usdc = usdcAddressEl.value.trim();
+          const relayer = relayerAddressEl.value.trim();
+          if (!usdc || !relayer) {
+            allowanceOut.textContent = "请填写 USDC 地址与 Relayer 地址";
+            return;
+          }
+          const abi = ["function allowance(address owner,address spender) view returns (uint256)"];
+          const c = new ethers.Contract(usdc, abi, walletProvider);
+          const raw = await c.allowance(owner, relayer);
+          const formatted = ethers.formatUnits(raw, 6);
+          allowanceOut.textContent = `${formatted} (raw=${raw.toString()})`;
+        } catch (e) {
+          allowanceOut.textContent = "读取失败: " + String(e);
+        }
+      }
+
+      async function approveUsdc() {
+        try {
+          if (!signer) {
+            allowanceOut.textContent = "请先连接钱包";
+            return;
+          }
+          const usdc = usdcAddressEl.value.trim();
+          const relayer = relayerAddressEl.value.trim();
+          const limit = approveLimitEl.value.trim();
+          if (!usdc || !relayer || !limit) {
+            allowanceOut.textContent = "请填写 USDC 地址、Relayer 地址、限额";
+            return;
+          }
+          const abi = ["function approve(address spender,uint256 amount) returns (bool)"];
+          const c = new ethers.Contract(usdc, abi, signer);
+          const amount = ethers.parseUnits(String(limit), 6);
+          const tx = await c.approve(relayer, amount);
+          allowanceOut.textContent = "已提交 approve: " + tx.hash;
+          await tx.wait();
+          allowanceOut.textContent = "approve 已确认: " + tx.hash;
+          await refreshAllowance();
+        } catch (e) {
+          allowanceOut.textContent = "approve 失败: " + String(e);
+        }
+      }
+
+      btnConnectWallet.addEventListener("click", connectWallet);
+      btnSwitchChain.addEventListener("click", switchToArcTestnet);
+      btnApprove.addEventListener("click", approveUsdc);
+      btnRefreshAllowance.addEventListener("click", refreshAllowance);
+
+      loadPublicConfig();
     </script>
   </body>
 </html>
