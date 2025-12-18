@@ -266,6 +266,13 @@
       #chatLog {
         min-height: 420px;
       }
+      .chat-input {
+        min-height: 90px;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+          Arial;
+        font-size: 14px;
+        line-height: 1.45;
+      }
     </style>
   </head>
   <body>
@@ -552,26 +559,35 @@
           <div>
             <label>聊天执行通道</label>
             <select id="chatBackend">
-              <option value="ws" selected>机器人直连（WS，可转账）</option>
-              <option value="openmind">AI（OpenMind，经 /api/dispatch）</option>
+              <option value="openmind" selected>AI（OpenMind，经 /api/dispatch）</option>
+              <option value="ws">机器人直连（WS，可转账）</option>
             </select>
           </div>
-          <div>
-            <label>Executor WebSocket URL（用于 WS 模式）</label>
-            <input id="wsUrlInline" placeholder="wss://xxxx.ngrok-free.app/ws" />
-            <div class="hint">Vercel/https 页面必须用 wss://；本地可用 ws://127.0.0.1:8787/ws</div>
+        </div>
+        <div id="wsInlineControls">
+          <div style="height: 10px"></div>
+          <div class="row">
+            <div>
+              <label>Executor WebSocket URL（用于 WS 模式）</label>
+              <input id="wsUrlInline" placeholder="wss://xxxx.ngrok-free.app/ws" />
+              <div class="hint">Vercel/https 页面必须用 wss://；本地可用 ws://127.0.0.1:8787/ws</div>
+            </div>
+            <div>
+              <label>WS 连接</label>
+              <div class="row row-2">
+                <button id="wsConnectBtnInline" class="btn">连接</button>
+                <button id="wsDisconnectBtnInline" class="btn secondary">断开</button>
+              </div>
+              <div class="hint">只在“机器人直连（WS）”模式下需要。</div>
+            </div>
           </div>
         </div>
-        <div style="height: 10px"></div>
-        <div class="row">
-          <button id="wsConnectBtnInline" class="btn">连接机器人（WS）</button>
-          <button id="wsDisconnectBtnInline" class="btn secondary">
-            断开机器人（WS）
-          </button>
-        </div>
         <div style="height: 12px"></div>
+        <label>对话框</label>
+        <textarea id="userText" class="chat-input" placeholder="直接输入你想对机器人说的话（支持中文）&#10;例如：你好，介绍一下你能做什么"></textarea>
+        <div style="height: 10px"></div>
         <div class="row row-tight">
-          <input id="userText" placeholder="例如：帮我转 0.1 USDC 到 0x..." />
+          <div class="hint">提示：转账/链上执行目前仍建议走本地 WS（测试网）。纯聊天用 OpenMind 模式即可。</div>
           <button id="sendBtn" class="btn">发送</button>
         </div>
         <div style="height: 12px"></div>
@@ -645,6 +661,7 @@
       const chatLog = $("chatLog");
       const err = $("err");
       const btn = $("sendBtn");
+      const wsInlineControls = document.getElementById("wsInlineControls");
 
       const wsLog = $("wsLog");
       const wsUrl = $("wsUrl");
@@ -865,6 +882,13 @@
         err.textContent = message;
       }
 
+      function updateChatBackendUI() {
+        const isWs = chatBackend && chatBackend.value === "ws";
+        if (wsInlineControls) wsInlineControls.style.display = isWs ? "block" : "none";
+      }
+      if (chatBackend) chatBackend.addEventListener("change", updateChatBackendUI);
+      updateChatBackendUI();
+
       // ---- Robot wallet (browser generated) ----
       btnRobotGenerate?.addEventListener("click", () => {
         try {
@@ -1041,6 +1065,7 @@
       function sendWs(text) {
         if (!sock || sock.readyState !== WebSocket.OPEN) {
           logLine("[ui] 未连接 websocket。");
+          setError("你选择了“机器人直连（WS）”模式，但还没连接 WS。请先连接，或切换到 OpenMind 模式。");
           return;
         }
         sock.send(text);
