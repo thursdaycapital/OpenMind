@@ -528,10 +528,10 @@
           <div>
             <label>强制命令模式（JSON）</label>
             <select id="forceJson">
-              <option value="on" selected>开启（建议）</option>
-              <option value="off">关闭</option>
+              <option value="off" selected>关闭（普通聊天）</option>
+              <option value="on">开启（强制 JSON commands）</option>
             </select>
-            <div class="hint">开启时会请求模型返回 JSON（commands），便于自动执行。</div>
+            <div class="hint">只有在你需要模型输出 JSON（commands）时才开启；普通聊天请关闭。</div>
           </div>
         </div>
         <div style="height: 12px"></div>
@@ -1101,7 +1101,13 @@
             body: {
               model,
               messages: [
-                { role: "system", content: system },
+                {
+                  role: "system",
+                  content:
+                    forceJsonSel.value === "on"
+                      ? system + "\n\nPlease respond in JSON (json)."
+                      : system,
+                },
                 { role: "user", content: userText },
               ],
               ...(forceJsonSel.value === "on"
