@@ -1134,13 +1134,41 @@
             data = { raw: text };
           }
 
-          // Display assistant content if present
-          let assistant = "";
-          try {
-            assistant = data?.openmind_response?.choices?.[0]?.message?.content || "";
-          } catch {}
+          function extractAssistantText(openmindResponse) {
+            try {
+              if (!openmindResponse) return "";
+              // Some OpenMind responses are wrapped as { data: { choices: ... } }
+              const root = openmindResponse?.data ? openmindResponse.data : openmindResponse;
+              const c0 = root?.choices?.[0];
+              const msg = c0?.message;
+              const content = msg?.content;
+              if (typeof content === "string" && content.trim()) return content.trim();
+              // Fallback: some providers put text elsewhere
+              const alt = c0?.text;
+              if (typeof alt === "string" && alt.trim()) return alt.trim();
+              // If it's an error-like payload, surface it
+              const errMsg =
+                root?.error?.message ||
+                openmindResponse?.error?.message ||
+                openmindResponse?.message ||
+                root?.message;
+              if (typeof errMsg === "string" && errMsg.trim()) return errMsg.trim();
+              return "";
+            } catch {
+              return "";
+            }
+          }
+
+          // Display assistant content (support multiple response shapes)
+          const assistant = extractAssistantText(data?.openmind_response);
           if (assistant) chatLog.textContent += `\n[助手] ${assistant}`;
-          else chatLog.textContent += `\n[助手] （已返回 OpenMind 响应，但未找到 message.content）`;
+          else {
+            const preview =
+              data?.openmind_response && typeof data.openmind_response === "object"
+                ? JSON.stringify(data.openmind_response).slice(0, 500)
+                : String(data?.openmind_response || data?.raw || "").slice(0, 500);
+            chatLog.textContent += `\n[助手] （未找到内容，响应预览：${preview}）`;
+          }
 
           // Store for confirm-to-execute
           lastOpenMindPayloadForExecutor = {
@@ -1149,7 +1177,10 @@
           };
 
           // Try to extract commands (best effort)
-          lastCommands = data?.openmind_response?.commands || null;
+          lastCommands =
+            data?.openmind_response?.commands ||
+            data?.openmind_response?.data?.commands ||
+            null;
           let contentCommands = null;
           if (!Array.isArray(lastCommands) && assistant) {
             try {
