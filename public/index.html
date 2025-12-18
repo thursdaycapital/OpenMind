@@ -505,23 +505,6 @@
       </div>
 
       <div class="card" id="chatCard">
-        <label>System Prompt（可选）</label>
-        <textarea
-          id="system"
-          placeholder="你是一个机器人助手。"
-        >你是一个机器人助手，负责用中文对话，并在测试网执行链上动作（仅测试网）。
-
-当用户表达“转账/发送 USDC”等意图时，你必须输出 **纯 JSON**（不要 Markdown/不要多余文字），格式为：
-{"commands":[{"type":"chain_execute","value":{...}}]}
-
-规则：
-- 使用 allowance 模式：USDC 转账必须使用 value.type="transfer_from_erc20"
-- 字段：token_address, from, to, amount(字符串), decimals:6, expected_chain_id
-- 批量：使用 value.times=N
-- 不要输出私钥，不要要求用户提供私钥
-
-当用户不是在请求交易时，你可以正常中文回复。</textarea>
-        <div style="height: 12px"></div>
         <label>对话框</label>
         <textarea id="userText" class="chat-input" placeholder="直接输入你想对机器人说的话（支持中文）&#10;例如：你好，介绍一下你能做什么"></textarea>
         <div style="height: 10px"></div>
@@ -1076,7 +1059,7 @@
         setError("");
         const apiKey = $("apiKey").value.trim();
         const model = $("model").value.trim() || "gpt-4.1-mini";
-        let system = $("system").value.trim() || "You are a helpful robot.";
+        let system = "你是一个有帮助的中文机器人助手。";
         const userText = $("userText").value.trim();
 
         if (!userText) return setError("请填写用户输入文本。");
