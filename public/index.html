@@ -522,6 +522,14 @@
 
 当用户不是在请求交易时，你可以正常中文回复。</textarea>
         <div style="height: 12px"></div>
+        <label>对话框</label>
+        <textarea id="userText" class="chat-input" placeholder="直接输入你想对机器人说的话（支持中文）&#10;例如：你好，介绍一下你能做什么"></textarea>
+        <div style="height: 10px"></div>
+        <div class="row row-tight">
+          <div class="hint">提示：转账/链上执行目前仍建议走本地 WS（测试网）。纯聊天用 OpenMind 模式即可。</div>
+          <button id="sendBtn" class="btn">发送</button>
+        </div>
+        <div style="height: 12px"></div>
         <label>聊天记录</label>
         <pre id="chatLog">尚未开始对话。</pre>
         <div style="height: 12px"></div>
@@ -581,14 +589,6 @@
               <div class="hint">只在“机器人直连（WS）”模式下需要。</div>
             </div>
           </div>
-        </div>
-        <div style="height: 12px"></div>
-        <label>对话框</label>
-        <textarea id="userText" class="chat-input" placeholder="直接输入你想对机器人说的话（支持中文）&#10;例如：你好，介绍一下你能做什么"></textarea>
-        <div style="height: 10px"></div>
-        <div class="row row-tight">
-          <div class="hint">提示：转账/链上执行目前仍建议走本地 WS（测试网）。纯聊天用 OpenMind 模式即可。</div>
-          <button id="sendBtn" class="btn">发送</button>
         </div>
         <div style="height: 12px"></div>
         <div class="row row-2">
